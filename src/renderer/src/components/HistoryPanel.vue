@@ -6,6 +6,7 @@ import {
   HeartIcon,
   HistoryIcon,
   ImageIcon,
+  ListIcon,
   MoreHorizontalIcon,
   RotateCcwIcon,
   SearchIcon,
@@ -26,6 +27,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 const props = defineProps<{
   history: GenerationJob[]
@@ -46,6 +48,8 @@ const emit = defineEmits<{
   select: [job: GenerationJob]
   reuse: [job: GenerationJob]
   delete: [job: GenerationJob]
+  continue: [job: GenerationJob, variant: boolean]
+  openFlow: []
 }>()
 
 function formatDate(value: string): string {
@@ -60,11 +64,21 @@ function formatDate(value: string): string {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-14 shrink-0 items-center justify-between px-4">
+    <div class="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
       <div class="flex items-center gap-2 text-sm font-medium">
         <HistoryIcon class="size-4" />历史记录
       </div>
-      <Badge variant="outline">{{ history.length }}</Badge>
+      <div class="flex items-center gap-2">
+        <ToggleGroup type="single" model-value="list" variant="outline" size="sm">
+          <ToggleGroupItem value="list" aria-label="列表模式">
+            <ListIcon />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="flow" aria-label="打开全屏流程" @click="emit('openFlow')">
+            <GitBranchIcon />
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <Badge variant="outline">{{ history.length }}</Badge>
+      </div>
     </div>
     <div class="flex shrink-0 gap-2 px-3 pb-3">
       <div class="relative min-w-0 flex-1">

@@ -30,6 +30,7 @@ import {
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import HistoryPanel from '@/components/HistoryPanel.vue'
+import GenerationFlow from '@/components/GenerationFlow.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -91,12 +92,24 @@ const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
 const previewOpen = ref(false)
 const historyOpen = ref(false)
+const flowOpen = ref(false)
+const flowGenerating = ref(false)
 const pendingDeleteJob = ref<GenerationJob | null>(null)
 const pendingReuseJob = ref<GenerationJob | null>(null)
 const deleting = ref(false)
 type Feedback = { type: 'info' | 'success' | 'error'; title: string; message: string }
 const generationFeedback = ref<Feedback | null>(null)
 const connectionFeedback = ref<Feedback | null>(null)
+type FlowCreation = {
+  job: GenerationJob
+  variant: boolean
+  prompt: string
+  size: string
+  quality: GenerationRequest['quality']
+  n: number
+  references: ReferenceImage[]
+}
+const flowCreation = ref<FlowCreation | null>(null)
 
 const form = reactive<GenerationRequest>({
   prompt: '',
@@ -247,20 +260,112 @@ function applyJobParameters(job: GenerationJob, keepReferences: boolean): void {
   )
 }
 
-async function continueWithAsset(asset: GeneratedAsset, variant = false): Promise<void> {
-  if (!selectedJob.value) return
+async function continueWithAsset(
+  asset: GeneratedAsset,
+  variant = false,
+  sourceJob = selectedJob.value
+): Promise<void> {
+  if (!sourceJob) return
   try {
     const reference = await api.useAssetAsReference(asset.id)
     references.value = [reference]
     form.referenceIds = [reference.id]
-    form.parentJobId = selectedJob.value.id
+    form.parentJobId = sourceJob.id
     form.sourceAssetId = asset.id
     form.inputFidelity = variant ? 'low' : 'high'
-    form.prompt = selectedJob.value.prompt
+    form.prompt = sourceJob.prompt
+    selectJob(sourceJob)
     previewOpen.value = false
+    historyOpen.value = false
+    flowOpen.value = false
     toast.success(variant ? '已准备生成变体，可调整提示词后生成。' : '已加入创作链。')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '无法继续创作。')
+  }
+}
+
+function continueFromHistory(job: GenerationJob, variant: boolean): void {
+  const asset = job.assets[0]
+  if (asset) void continueWithAsset(asset, variant, job)
+}
+
+function openFlow(): void {
+  historyOpen.value = false
+  flowOpen.value = true
+}
+
+function selectFlowJob(job: GenerationJob): void {
+  selectJob(job)
+}
+
+function openFlowCreation(job: GenerationJob, variant: boolean): void {
+  flowCreation.value = {
+    job,
+    variant,
+    prompt: job.prompt,
+    size: job.request.size,
+    quality: job.request.quality,
+    n: job.request.n,
+    references: []
+  }
+}
+
+async function pickFlowReferences(): Promise<void> {
+  const creation = flowCreation.value
+  if (!creation) return
+  try {
+    const picked = await api.pickReferenceImages()
+    const existingIds = new Set(creation.references.map((item) => item.id))
+    const unique = picked.filter((item) => !existingIds.has(item.id))
+    creation.references = [...creation.references, ...unique].slice(0, 15)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '参考图片读取失败。')
+  }
+}
+
+function removeFlowReference(id: string): void {
+  if (!flowCreation.value) return
+  flowCreation.value.references = flowCreation.value.references.filter((item) => item.id !== id)
+}
+
+async function generateFromFlow(): Promise<void> {
+  const creation = flowCreation.value
+  const asset = creation?.job.assets[0]
+  if (!creation || !asset || !creation.prompt.trim() || flowGenerating.value) return
+  if (!settings.value.hasApiKey) {
+    settingsOpen.value = true
+    toast.info('请先配置 API Key。')
+    return
+  }
+
+  flowGenerating.value = true
+  try {
+    const reference = await api.useAssetAsReference(asset.id)
+    const result = await api.generate({
+      prompt: creation.prompt.trim(),
+      referenceIds: [reference.id, ...creation.references.map((item) => item.id)],
+      parentJobId: creation.job.id,
+      sourceAssetId: asset.id,
+      n: creation.n,
+      size: creation.size,
+      quality: creation.quality,
+      format: creation.job.request.format,
+      compression: creation.job.request.compression,
+      background: creation.job.request.background,
+      inputFidelity: creation.variant ? 'low' : 'high'
+    })
+    if (!result.success) {
+      toast.error(result.message, { duration: 8000 })
+      return
+    }
+    history.value.unshift(result.job)
+    selectJob(result.job)
+    flowCreation.value = null
+    toast.success(creation.variant ? '变体已加入创作流程。' : '新节点已加入创作流程。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '流程节点生成失败。', { duration: 8000 })
+  } finally {
+    flowGenerating.value = false
   }
 }
 
@@ -413,7 +518,16 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="flex h-screen flex-col bg-background">
+  <GenerationFlow
+    v-if="flowOpen"
+    :history="history"
+    :selected-job-id="selectedJob?.id"
+    @close="flowOpen = false"
+    @select="selectFlowJob"
+    @create="openFlowCreation"
+    @delete="pendingDeleteJob = $event"
+  />
+  <div v-else class="flex h-screen flex-col bg-background">
     <header
       class="flex h-14 shrink-0 items-center border-b bg-card/70 px-4 backdrop-blur-xl [-webkit-app-region:drag]"
     >
@@ -817,6 +931,8 @@ onMounted(load)
           @select="selectHistoryJob"
           @reuse="reuseJob"
           @delete="pendingDeleteJob = $event"
+          @continue="continueFromHistory"
+          @open-flow="openFlow"
         />
       </aside>
     </main>
@@ -834,6 +950,8 @@ onMounted(load)
         @select="selectHistoryJob"
         @reuse="reuseJob"
         @delete="pendingDeleteJob = $event"
+        @continue="continueFromHistory"
+        @open-flow="openFlow"
       />
     </SheetContent>
   </Sheet>
@@ -884,6 +1002,159 @@ onMounted(load)
         <Button variant="destructive" :disabled="deleting" @click="deleteJob">
           <LoaderCircleIcon v-if="deleting" data-icon="inline-start" class="animate-spin" />
           永久删除
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog
+    :open="Boolean(flowCreation)"
+    @update:open="!$event && !flowGenerating && (flowCreation = null)"
+  >
+    <DialogContent
+      class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+      :show-close-button="!flowGenerating"
+    >
+      <DialogHeader>
+        <DialogTitle>{{ flowCreation?.variant ? '生成节点变体' : '基于节点继续创作' }}</DialogTitle>
+        <DialogDescription>
+          当前图片会作为参考，生成结果将自动连接到该节点并保留在流程画布中。
+        </DialogDescription>
+      </DialogHeader>
+      <div v-if="flowCreation" class="flex flex-col gap-5">
+        <div class="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
+          <img
+            v-if="flowCreation.job.assets[0]"
+            :src="flowCreation.job.assets[0].url"
+            alt="来源节点图片"
+            class="size-16 rounded-lg object-cover"
+          />
+          <div class="min-w-0">
+            <Badge variant="secondary">来源节点</Badge>
+            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {{ flowCreation.job.prompt }}
+            </p>
+          </div>
+        </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel for="flow-prompt">提示词</FieldLabel>
+            <Textarea
+              id="flow-prompt"
+              v-model="flowCreation.prompt"
+              class="min-h-32 resize-none"
+              placeholder="描述希望基于当前节点继续生成的画面……"
+              :disabled="flowGenerating"
+            />
+            <FieldDescription class="flex justify-between">
+              <span>{{ flowCreation.variant ? '灵活生成相似变体' : '高度还原来源图片' }}</span>
+              <span>{{ flowCreation.prompt.length }}/32000</span>
+            </FieldDescription>
+          </Field>
+          <Field>
+            <div class="flex items-center justify-between">
+              <FieldLabel>参考图片</FieldLabel>
+              <span class="text-xs text-muted-foreground">
+                {{ flowCreation.references.length + 1 }}/16
+              </span>
+            </div>
+            <div class="grid grid-cols-6 gap-2">
+              <div class="relative aspect-square overflow-hidden rounded-lg border bg-muted">
+                <img
+                  v-if="flowCreation.job.assets[0]"
+                  :src="flowCreation.job.assets[0].url"
+                  alt="来源节点参考图"
+                  class="size-full object-cover"
+                />
+                <Badge class="absolute bottom-1 left-1" variant="secondary">节点</Badge>
+              </div>
+              <div
+                v-for="image in flowCreation.references"
+                :key="image.id"
+                class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
+              >
+                <img :src="image.url" :alt="image.name" class="size-full object-cover" />
+                <Button
+                  variant="destructive"
+                  size="icon-xs"
+                  class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
+                  :disabled="flowGenerating"
+                  aria-label="移除参考图"
+                  @click="removeFlowReference(image.id)"
+                >
+                  <XIcon />
+                </Button>
+              </div>
+              <button
+                v-if="flowCreation.references.length < 15"
+                type="button"
+                class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                :disabled="flowGenerating"
+                aria-label="继续上传参考图片"
+                @click="pickFlowReferences"
+              >
+                <PlusIcon class="size-4" />
+              </button>
+            </div>
+            <FieldDescription>
+              来源节点固定作为第一张参考图，可继续添加 PNG、JPG 或 WebP。
+            </FieldDescription>
+          </Field>
+          <div class="grid grid-cols-3 gap-3">
+            <Field>
+              <FieldLabel>画幅</FieldLabel>
+              <Select v-model="flowCreation.size" :disabled="flowGenerating">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="1024x1024">1:1</SelectItem>
+                    <SelectItem value="1536x1024">3:2</SelectItem>
+                    <SelectItem value="1024x1536">2:3</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>质量</FieldLabel>
+              <Select v-model="flowCreation.quality" :disabled="flowGenerating">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="auto">自动</SelectItem>
+                    <SelectItem value="low">低</SelectItem>
+                    <SelectItem value="medium">中</SelectItem>
+                    <SelectItem value="high">高</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>数量</FieldLabel>
+              <Select v-model="flowCreation.n" :disabled="flowGenerating">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem v-for="count in 4" :key="count" :value="count">
+                      {{ count }} 张
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+        </FieldGroup>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" :disabled="flowGenerating" @click="flowCreation = null">
+          取消
+        </Button>
+        <Button
+          :disabled="!flowCreation?.prompt.trim() || flowGenerating"
+          @click="generateFromFlow"
+        >
+          <LoaderCircleIcon v-if="flowGenerating" data-icon="inline-start" class="animate-spin" />
+          <SparklesIcon v-else data-icon="inline-start" />
+          {{ flowGenerating ? '正在生成…' : '生成并加入流程' }}
         </Button>
       </DialogFooter>
     </DialogContent>
