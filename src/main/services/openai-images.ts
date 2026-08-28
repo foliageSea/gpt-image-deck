@@ -20,6 +20,7 @@ import { addHistory } from './history-store'
 const validSizes = new Set(['auto', '1024x1024', '1536x1024', '1024x1536'])
 
 function validate(request: GenerationRequest): void {
+  if (!request.projectId) throw new Error('请先选择项目。')
   const prompt = request.prompt.trim()
   if (!prompt || prompt.length > 32000) throw new Error('提示词长度应为 1 到 32000 个字符。')
   if (!Number.isInteger(request.n) || request.n < 1 || request.n > 10)
@@ -172,9 +173,10 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
           outputTokens: rawUsage.output_tokens
         }
       : undefined
-    const { referenceIds, parentJobId, sourceAssetId, ...generationOptions } = request
+    const { projectId, referenceIds, parentJobId, sourceAssetId, ...generationOptions } = request
     const job: GenerationJob = {
       id,
+      projectId,
       createdAt: new Date().toISOString(),
       status: assets.length === request.n ? 'completed' : 'partial',
       prompt: request.prompt.trim(),

@@ -9,6 +9,12 @@ import {
   setAssetFavorite
 } from './services/history-store'
 import { generateImage, getImageErrorMessage, testConnection } from './services/openai-images'
+import {
+  createProject,
+  deleteProject,
+  getProjectState,
+  selectProject
+} from './services/project-store'
 import { getStoredSettings, updateStoredSettings } from './services/settings-store'
 import {
   pickReferenceImages,
@@ -115,6 +121,11 @@ export function registerIpcHandlers(): void {
   )
   handle<[GenerationRequest], unknown>('images:generate', async (event, request) => {
     try {
+      const projectId = requireUuid(request.projectId, '项目')
+      const projects = await getProjectState()
+      if (!projects.projects.some((project) => project.id === projectId)) {
+        throw new Error('项目不存在。')
+      }
       const job = await generateImage(request)
       notifyGenerationComplete(event, job.assets.length)
       return { success: true, job }
@@ -122,11 +133,28 @@ export function registerIpcHandlers(): void {
       return { success: false, message: getImageErrorMessage(error) }
     }
   })
-  handle('history:list', async () => listHistory())
+  handle('projects:get', async () => getProjectState())
+  handle<[string], unknown>('projects:create', async (_, name) => {
+    if (typeof name !== 'string') throw new Error('项目名称无效。')
+    return createProject(name)
+  })
+  handle<[string], unknown>('projects:select', async (_, projectId) =>
+    selectProject(requireUuid(projectId, '项目'))
+  )
+  handle<[string], unknown>('projects:delete', async (_, projectId) => {
+    const id = requireUuid(projectId, '项目')
+    await clearHistory(id)
+    return deleteProject(id)
+  })
+  handle<[string], unknown>('history:list', async (_, projectId) =>
+    listHistory(requireUuid(projectId, '项目'))
+  )
   handle<[string], void>('history:delete', async (_, jobId) => {
     await deleteHistory(requireUuid(jobId, '历史记录'))
   })
-  handle('history:clear', async () => clearHistory())
+  handle<[string], void>('history:clear', async (_, projectId) =>
+    clearHistory(requireUuid(projectId, '项目'))
+  )
   handle<[string, boolean], unknown>('history:set-asset-favorite', async (_, assetId, favorite) => {
     if (typeof favorite !== 'boolean') throw new Error('收藏状态无效。')
     return setAssetFavorite(requireUuid(assetId, '图片'), favorite)

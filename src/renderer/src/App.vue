@@ -4,6 +4,8 @@ import type {
   GeneratedAsset,
   GenerationJob,
   GenerationRequest,
+  Project,
+  ProjectState,
   ReferenceImage
 } from '../../shared/image-types'
 import {
@@ -16,10 +18,12 @@ import {
   ImageIcon,
   ImagesIcon,
   LoaderCircleIcon,
+  FolderIcon,
   PlusIcon,
   RotateCcwIcon,
   Settings2Icon,
   SparklesIcon,
+  Trash2Icon,
   UploadCloudIcon,
   WandSparklesIcon,
   CircleAlertIcon,
@@ -87,6 +91,13 @@ const settingsOpen = ref(false)
 const testing = ref(false)
 const generating = ref(false)
 const references = ref<ReferenceImage[]>([])
+const projectState = ref<ProjectState>({ projects: [], currentProjectId: '' })
+const projectsOpen = ref(false)
+const projectName = ref('')
+const creatingProject = ref(false)
+const changingProject = ref(false)
+const pendingDeleteProject = ref<Project | null>(null)
+const deletingProject = ref(false)
 const history = ref<GenerationJob[]>([])
 const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
@@ -112,6 +123,7 @@ type FlowCreation = {
 const flowCreation = ref<FlowCreation | null>(null)
 
 const form = reactive<GenerationRequest>({
+  projectId: '',
   prompt: '',
   referenceIds: [],
   n: 1,
@@ -123,7 +135,13 @@ const form = reactive<GenerationRequest>({
   inputFidelity: 'low'
 })
 
-const canGenerate = computed(() => form.prompt.trim().length > 0 && !generating.value)
+const canGenerate = computed(
+  () => Boolean(form.projectId) && form.prompt.trim().length > 0 && !generating.value
+)
+const projectBusy = computed(() => generating.value || flowGenerating.value)
+const currentProject = computed(() =>
+  projectState.value.projects.find((project) => project.id === projectState.value.currentProjectId)
+)
 const currentAssets = computed(() => selectedJob.value?.assets ?? [])
 const favoriteAssets = computed(() => currentAssets.value.filter((asset) => asset.favorite))
 const compressionSlider = computed({
@@ -160,8 +178,11 @@ function formatBytes(bytes: number): string {
 
 async function load(): Promise<void> {
   try {
-    const [nextSettings, nextHistory] = await Promise.all([api.getSettings(), api.listHistory()])
+    const [nextSettings, nextProjects] = await Promise.all([api.getSettings(), api.getProjects()])
+    const nextHistory = await api.listHistory(nextProjects.currentProjectId)
     settings.value = nextSettings
+    projectState.value = nextProjects
+    form.projectId = nextProjects.currentProjectId
     history.value = nextHistory
     settingsForm.baseUrl = nextSettings.baseUrl
     settingsForm.model = nextSettings.model
@@ -170,6 +191,72 @@ async function load(): Promise<void> {
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '应用数据加载失败。')
   }
+}
+
+function resetProjectContext(): void {
+  selectJob(null)
+  references.value = []
+  form.referenceIds = []
+  form.parentJobId = undefined
+  form.sourceAssetId = undefined
+  flowOpen.value = false
+  flowCreation.value = null
+  pendingReuseJob.value = null
+}
+
+async function applyProjectState(next: ProjectState): Promise<void> {
+  projectState.value = next
+  form.projectId = next.currentProjectId
+  resetProjectContext()
+  history.value = await api.listHistory(next.currentProjectId)
+  selectJob(history.value[0] ?? null)
+}
+
+async function switchProject(projectId: unknown): Promise<void> {
+  if (typeof projectId !== 'string' || projectId === projectState.value.currentProjectId) return
+  changingProject.value = true
+  try {
+    await applyProjectState(await api.selectProject(projectId))
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目切换失败。')
+  } finally {
+    changingProject.value = false
+  }
+}
+
+async function createNewProject(): Promise<void> {
+  if (!projectName.value.trim() || creatingProject.value) return
+  creatingProject.value = true
+  try {
+    await applyProjectState(await api.createProject(projectName.value))
+    projectName.value = ''
+    projectsOpen.value = false
+    toast.success('项目已创建。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目创建失败。')
+  } finally {
+    creatingProject.value = false
+  }
+}
+
+async function deleteCurrentProject(): Promise<void> {
+  const project = pendingDeleteProject.value
+  if (!project) return
+  deletingProject.value = true
+  try {
+    await applyProjectState(await api.deleteProject(project.id))
+    pendingDeleteProject.value = null
+    toast.success('项目及其历史记录已删除。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目删除失败。')
+  } finally {
+    deletingProject.value = false
+  }
+}
+
+function confirmDeleteProject(): void {
+  pendingDeleteProject.value = currentProject.value ?? null
+  projectsOpen.value = false
 }
 
 async function pickReferences(): Promise<void> {
@@ -214,14 +301,22 @@ async function generate(): Promise<void> {
       return
     }
     const job = result.job
-    history.value.unshift(job)
-    selectJob(job)
+    if (job.projectId === projectState.value.currentProjectId) {
+      history.value.unshift(job)
+      selectJob(job)
+    }
     generationFeedback.value = {
       type: 'success',
       title: '生成完成',
       message: `已收到 ${job.assets.length} 张图片并保存到本地历史。`
     }
-    toast.success(job.status === 'partial' ? '图片已部分生成。' : '图片生成完成。')
+    toast.success(
+      job.projectId === projectState.value.currentProjectId
+        ? job.status === 'partial'
+          ? '图片已部分生成。'
+          : '图片生成完成。'
+        : '图片生成完成，已保存到原项目。'
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : '图片生成失败。'
     generationFeedback.value = { type: 'error', title: '生成失败', message }
@@ -342,6 +437,7 @@ async function generateFromFlow(): Promise<void> {
   try {
     const reference = await api.useAssetAsReference(asset.id)
     const result = await api.generate({
+      projectId: projectState.value.currentProjectId,
       prompt: creation.prompt.trim(),
       referenceIds: [reference.id, ...creation.references.map((item) => item.id)],
       parentJobId: creation.job.id,
@@ -358,8 +454,10 @@ async function generateFromFlow(): Promise<void> {
       toast.error(result.message, { duration: 8000 })
       return
     }
-    history.value.unshift(result.job)
-    selectJob(result.job)
+    if (result.job.projectId === projectState.value.currentProjectId) {
+      history.value.unshift(result.job)
+      selectJob(result.job)
+    }
     flowCreation.value = null
     toast.success(creation.variant ? '变体已加入创作流程。' : '新节点已加入创作流程。')
   } catch (error) {
@@ -537,7 +635,7 @@ onMounted(load)
         >
           <WandSparklesIcon />
         </div>
-        <div>
+        <div class="hidden sm:block">
           <h1 class="text-sm font-semibold tracking-tight">Image Deck</h1>
           <p class="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             GPT Image Studio
@@ -545,6 +643,36 @@ onMounted(load)
         </div>
       </div>
       <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+        <Select
+          :model-value="projectState.currentProjectId"
+          :disabled="changingProject || projectBusy"
+          @update:model-value="switchProject"
+        >
+          <SelectTrigger class="w-32 sm:w-40" aria-label="当前项目">
+            <FolderIcon />
+            <SelectValue placeholder="选择项目" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem
+                v-for="project in projectState.projects"
+                :key="project.id"
+                :value="project.id"
+              >
+                {{ project.name }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="管理项目"
+          :disabled="projectBusy"
+          @click="projectsOpen = true"
+        >
+          <PlusIcon />
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -554,7 +682,10 @@ onMounted(load)
         >
           <HistoryIcon data-icon="inline-start" />历史
         </Button>
-        <Badge :variant="settings.hasApiKey ? 'secondary' : 'outline'" class="gap-1.5">
+        <Badge
+          :variant="settings.hasApiKey ? 'secondary' : 'outline'"
+          class="hidden gap-1.5 md:flex"
+        >
           <span
             :class="[
               'size-1.5 rounded-full',
@@ -1001,6 +1132,83 @@ onMounted(load)
         >
         <Button variant="destructive" :disabled="deleting" @click="deleteJob">
           <LoaderCircleIcon v-if="deleting" data-icon="inline-start" class="animate-spin" />
+          永久删除
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog v-model:open="projectsOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>项目管理</DialogTitle>
+        <DialogDescription>每个项目拥有独立的历史记录和创作流程。</DialogDescription>
+      </DialogHeader>
+      <FieldGroup>
+        <Field>
+          <FieldLabel for="project-name">新项目名称</FieldLabel>
+          <div class="flex gap-2">
+            <Input
+              id="project-name"
+              v-model="projectName"
+              maxlength="50"
+              placeholder="例如：夏季产品视觉"
+              @keydown.enter="createNewProject"
+            />
+            <Button
+              :disabled="!projectName.trim() || creatingProject || projectBusy"
+              @click="createNewProject"
+            >
+              <LoaderCircleIcon
+                v-if="creatingProject"
+                data-icon="inline-start"
+                class="animate-spin"
+              />
+              创建
+            </Button>
+          </div>
+        </Field>
+        <Field>
+          <FieldLabel>当前项目</FieldLabel>
+          <div class="flex items-center justify-between gap-3 rounded-xl border p-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium">{{ currentProject?.name }}</p>
+              <p class="text-xs text-muted-foreground">{{ history.length }} 条历史记录</p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              :disabled="projectState.projects.length === 1"
+              @click="confirmDeleteProject"
+            >
+              <Trash2Icon data-icon="inline-start" />删除项目
+            </Button>
+          </div>
+          <FieldDescription v-if="projectState.projects.length === 1">
+            至少需要保留一个项目。
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog
+    :open="Boolean(pendingDeleteProject)"
+    @update:open="!$event && (pendingDeleteProject = null)"
+  >
+    <DialogContent :show-close-button="false">
+      <DialogHeader>
+        <DialogTitle>永久删除“{{ pendingDeleteProject?.name }}”？</DialogTitle>
+        <DialogDescription>
+          该项目中的历史记录和本地图片将一并删除，此操作无法撤销。
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button variant="outline" :disabled="deletingProject" @click="pendingDeleteProject = null">
+          取消
+        </Button>
+        <Button variant="destructive" :disabled="deletingProject" @click="deleteCurrentProject">
+          <LoaderCircleIcon v-if="deletingProject" data-icon="inline-start" class="animate-spin" />
           永久删除
         </Button>
       </DialogFooter>

@@ -1,6 +1,7 @@
 import type { GenerationJob } from '../../shared/image-types'
 import { dataPath, readJson, writeJson } from './storage'
 import { deleteJobAssets, restoreAssets } from './asset-store'
+import { getDefaultProjectId } from './project-store'
 
 let cache: GenerationJob[] | null = null
 const historyPath = (): string => dataPath('history.json')
@@ -8,19 +9,29 @@ const historyPath = (): string => dataPath('history.json')
 async function history(): Promise<GenerationJob[]> {
   if (!cache) {
     cache = await readJson<GenerationJob[]>(historyPath(), [])
+    const defaultProjectId = await getDefaultProjectId()
+    let migrated = false
+    cache = cache.map((job) => {
+      if (job.projectId) return job
+      migrated = true
+      return { ...job, projectId: defaultProjectId }
+    })
+    if (migrated) await writeJson(historyPath(), cache)
     for (const job of cache) restoreAssets(job.id, job.assets)
   }
   return cache
 }
 
-export async function listHistory(): Promise<GenerationJob[]> {
-  return [...(await history())]
+export async function listHistory(projectId: string): Promise<GenerationJob[]> {
+  return (await history()).filter((job) => job.projectId === projectId)
 }
 
 export async function addHistory(job: GenerationJob): Promise<void> {
   const values = await history()
-  const next = [job, ...values].slice(0, 200)
-  const removed = values.slice(199)
+  const projectJobs = values.filter((value) => value.projectId === job.projectId)
+  const removed = projectJobs.slice(199)
+  const removedIds = new Set(removed.map((value) => value.id))
+  const next = [job, ...values.filter((value) => !removedIds.has(value.id))]
   await writeJson(historyPath(), next)
   cache = next
   await Promise.allSettled(removed.map((value) => deleteJobAssets(value.id)))
@@ -35,11 +46,13 @@ export async function deleteHistory(jobId: string): Promise<void> {
   await Promise.allSettled([deleteJobAssets(jobId)])
 }
 
-export async function clearHistory(): Promise<void> {
+export async function clearHistory(projectId: string): Promise<void> {
   const values = await history()
-  await writeJson(historyPath(), [])
-  cache = []
-  await Promise.allSettled(values.map((job) => deleteJobAssets(job.id)))
+  const removed = values.filter((job) => job.projectId === projectId)
+  const next = values.filter((job) => job.projectId !== projectId)
+  await writeJson(historyPath(), next)
+  cache = next
+  await Promise.allSettled(removed.map((job) => deleteJobAssets(job.id)))
 }
 
 export async function setAssetFavorite(assetId: string, favorite: boolean): Promise<GenerationJob> {

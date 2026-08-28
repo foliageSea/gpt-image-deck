@@ -13,6 +13,7 @@ export interface ReferenceImage {
 }
 
 export interface GenerationRequest {
+  projectId: string
   prompt: string
   referenceIds: string[]
   parentJobId?: string
@@ -43,12 +44,16 @@ export interface TokenUsage {
 
 export interface GenerationJob {
   id: string
+  projectId: string
   createdAt: string
   status: JobStatus
   prompt: string
   parentJobId?: string
   sourceAssetId?: string
-  request: Omit<GenerationRequest, 'referenceIds' | 'parentJobId' | 'sourceAssetId'> & {
+  request: Omit<
+    GenerationRequest,
+    'projectId' | 'referenceIds' | 'parentJobId' | 'sourceAssetId'
+  > & {
     referenceCount: number
   }
   assets: GeneratedAsset[]
@@ -77,6 +82,17 @@ export interface OperationResult {
   message?: string
 }
 
+export interface Project {
+  id: string
+  name: string
+  createdAt: string
+}
+
+export interface ProjectState {
+  projects: Project[]
+  currentProjectId: string
+}
+
 export type GenerationResult =
   { success: true; job: GenerationJob } | { success: false; message: string }
 
@@ -89,9 +105,13 @@ export interface ImageDeckApi {
   pickReferenceImages: () => Promise<ReferenceImage[]>
   useAssetAsReference: (assetId: string) => Promise<ReferenceImage>
   generate: (request: GenerationRequest) => Promise<GenerationResult>
-  listHistory: () => Promise<GenerationJob[]>
+  getProjects: () => Promise<ProjectState>
+  createProject: (name: string) => Promise<ProjectState>
+  selectProject: (projectId: string) => Promise<ProjectState>
+  deleteProject: (projectId: string) => Promise<ProjectState>
+  listHistory: (projectId: string) => Promise<GenerationJob[]>
   deleteHistory: (jobId: string) => Promise<void>
-  clearHistory: () => Promise<void>
+  clearHistory: (projectId: string) => Promise<void>
   setAssetFavorite: (assetId: string, favorite: boolean) => Promise<GenerationJob>
   saveAsset: (assetId: string) => Promise<OperationResult>
   saveAssets: (assetIds: string[]) => Promise<OperationResult>
