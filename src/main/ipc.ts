@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ConnectionTestInput, GenerationRequest, SettingsUpdate } from '../shared/image-types'
-import { app, BrowserWindow, ipcMain, Notification } from 'electron'
+import { BrowserWindow, ipcMain, Notification } from 'electron'
 import { clearApiKey, hasApiKey, isSecureStorageAvailable, setApiKey } from './services/credentials'
 import {
   clearHistory,
@@ -63,7 +63,6 @@ function notifyGenerationComplete(event: IpcMainInvokeEvent, imageCount: number)
       if (window.isMinimized()) window.restore()
       window.show()
       window.focus()
-      app.focus({ steal: true })
     })
     notification.show()
   } catch (error) {
