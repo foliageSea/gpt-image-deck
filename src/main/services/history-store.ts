@@ -41,3 +41,12 @@ export async function clearHistory(): Promise<void> {
   cache = []
   await Promise.allSettled(values.map((job) => deleteJobAssets(job.id)))
 }
+
+export async function setAssetFavorite(assetId: string, favorite: boolean): Promise<GenerationJob> {
+  const values = await history()
+  const job = values.find((item) => item.assets.some((asset) => asset.id === assetId))
+  if (!job) throw new Error('图片对应的历史记录不存在。')
+  job.assets = job.assets.map((asset) => (asset.id === assetId ? { ...asset, favorite } : asset))
+  await writeJson(historyPath(), values)
+  return job
+}

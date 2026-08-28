@@ -2,10 +2,21 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { ConnectionTestInput, GenerationRequest, SettingsUpdate } from '../shared/image-types'
 import { ipcMain } from 'electron'
 import { clearApiKey, hasApiKey, isSecureStorageAvailable, setApiKey } from './services/credentials'
-import { clearHistory, deleteHistory, listHistory } from './services/history-store'
+import {
+  clearHistory,
+  deleteHistory,
+  listHistory,
+  setAssetFavorite
+} from './services/history-store'
 import { generateImage, getImageErrorMessage, testConnection } from './services/openai-images'
 import { getStoredSettings, updateStoredSettings } from './services/settings-store'
-import { pickReferenceImages, saveAsset, showAsset } from './services/asset-store'
+import {
+  pickReferenceImages,
+  saveAsset,
+  saveAssets,
+  showAsset,
+  useAssetAsReference
+} from './services/asset-store'
 
 function validateSender(event: IpcMainInvokeEvent): void {
   const url = event.senderFrame?.url
@@ -78,6 +89,9 @@ export function registerIpcHandlers(): void {
   })
 
   handle('references:pick', async () => pickReferenceImages())
+  handle<[string], unknown>('references:from-asset', async (_, assetId) =>
+    useAssetAsReference(requireUuid(assetId, '图片'))
+  )
   handle<[GenerationRequest], unknown>('images:generate', async (_, request) => {
     try {
       return { success: true, job: await generateImage(request) }
@@ -90,10 +104,22 @@ export function registerIpcHandlers(): void {
     await deleteHistory(requireUuid(jobId, '历史记录'))
   })
   handle('history:clear', async () => clearHistory())
+  handle<[string, boolean], unknown>('history:set-asset-favorite', async (_, assetId, favorite) => {
+    if (typeof favorite !== 'boolean') throw new Error('收藏状态无效。')
+    return setAssetFavorite(requireUuid(assetId, '图片'), favorite)
+  })
   handle<[string], unknown>('asset:save', async (_, assetId) => ({
     success: await saveAsset(requireUuid(assetId, '图片')),
     message: '图片已保存。'
   }))
+  handle<[string[]], unknown>('asset:save-many', async (_, assetIds) => {
+    if (!Array.isArray(assetIds) || assetIds.length > 100) throw new Error('图片列表无效。')
+    const count = await saveAssets(assetIds.map((id) => requireUuid(id, '图片')))
+    return {
+      success: count > 0,
+      message: count > 0 ? `已导出 ${count} 张图片。` : '已取消导出。'
+    }
+  })
   handle<[string], void>('asset:show', async (_, assetId) =>
     showAsset(requireUuid(assetId, '图片'))
   )

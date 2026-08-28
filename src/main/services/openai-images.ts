@@ -172,12 +172,14 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
           outputTokens: rawUsage.output_tokens
         }
       : undefined
-    const { referenceIds, ...generationOptions } = request
+    const { referenceIds, parentJobId, sourceAssetId, ...generationOptions } = request
     const job: GenerationJob = {
       id,
       createdAt: new Date().toISOString(),
       status: assets.length === request.n ? 'completed' : 'partial',
       prompt: request.prompt.trim(),
+      parentJobId,
+      sourceAssetId,
       request: { ...generationOptions, referenceCount: referenceIds.length },
       assets,
       usage

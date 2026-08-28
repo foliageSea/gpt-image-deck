@@ -7,10 +7,14 @@ import type {
   ReferenceImage
 } from '../../shared/image-types'
 import {
+  CopyIcon,
   DownloadIcon,
   FolderOpenIcon,
+  GitBranchIcon,
+  HeartIcon,
   HistoryIcon,
   ImageIcon,
+  ImagesIcon,
   LoaderCircleIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -108,6 +112,7 @@ const form = reactive<GenerationRequest>({
 
 const canGenerate = computed(() => form.prompt.trim().length > 0 && !generating.value)
 const currentAssets = computed(() => selectedJob.value?.assets ?? [])
+const favoriteAssets = computed(() => currentAssets.value.filter((asset) => asset.favorite))
 const compressionSlider = computed({
   get: () => [form.compression],
   set: (value: number[]) => {
@@ -227,6 +232,8 @@ function applyJobParameters(job: GenerationJob, keepReferences: boolean): void {
   form.compression = job.request.compression
   form.background = job.request.background
   form.inputFidelity = job.request.inputFidelity
+  form.parentJobId = job.id
+  form.sourceAssetId = undefined
   if (!keepReferences) {
     references.value = []
     form.referenceIds = []
@@ -238,6 +245,69 @@ function applyJobParameters(job: GenerationJob, keepReferences: boolean): void {
       ? '提示词和输出参数已载入，请重新选择原参考图片。'
       : '提示词和参数已载入。'
   )
+}
+
+async function continueWithAsset(asset: GeneratedAsset, variant = false): Promise<void> {
+  if (!selectedJob.value) return
+  try {
+    const reference = await api.useAssetAsReference(asset.id)
+    references.value = [reference]
+    form.referenceIds = [reference.id]
+    form.parentJobId = selectedJob.value.id
+    form.sourceAssetId = asset.id
+    form.inputFidelity = variant ? 'low' : 'high'
+    form.prompt = selectedJob.value.prompt
+    previewOpen.value = false
+    toast.success(variant ? '已准备生成变体，可调整提示词后生成。' : '已加入创作链。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '无法继续创作。')
+  }
+}
+
+async function toggleFavorite(asset: GeneratedAsset): Promise<void> {
+  try {
+    const updated = await api.setAssetFavorite(asset.id, !asset.favorite)
+    const index = history.value.findIndex((job) => job.id === updated.id)
+    if (index >= 0) history.value[index] = updated
+    if (selectedJob.value?.id === updated.id) {
+      selectedJob.value = updated
+      selectedAsset.value =
+        updated.assets.find((item) => item.id === asset.id) ?? updated.assets[0] ?? null
+    }
+    toast.success(asset.favorite ? '已取消收藏。' : '已收藏图片。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '收藏操作失败。')
+  }
+}
+
+async function saveAssets(assets: GeneratedAsset[]): Promise<void> {
+  try {
+    const result = await api.saveAssets(assets.map((asset) => asset.id))
+    if (result.message) result.success ? toast.success(result.message) : toast.info(result.message)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '批量导出失败。')
+  }
+}
+
+async function copyPrompt(): Promise<void> {
+  if (!selectedJob.value) return
+  try {
+    await navigator.clipboard.writeText(selectedJob.value.prompt)
+    toast.success('提示词已复制。')
+  } catch {
+    toast.error('提示词复制失败。')
+  }
+}
+
+function resetParameters(): void {
+  form.n = 1
+  form.size = '1024x1024'
+  form.quality = 'auto'
+  form.format = 'png'
+  form.compression = 90
+  form.background = 'auto'
+  form.inputFidelity = 'low'
+  toast.success('输出参数已重置。')
 }
 
 function reuseJob(job: GenerationJob): void {
@@ -455,7 +525,12 @@ onMounted(load)
               </Field>
 
               <Field>
-                <FieldLabel>画幅</FieldLabel>
+                <div class="flex items-center justify-between">
+                  <FieldLabel>画幅</FieldLabel>
+                  <Button variant="ghost" size="xs" type="button" @click="resetParameters">
+                    <RotateCcwIcon data-icon="inline-start" />重置参数
+                  </Button>
+                </div>
                 <ToggleGroup
                   v-model="form.size"
                   type="single"
@@ -625,6 +700,9 @@ onMounted(load)
                 <div class="min-w-0">
                   <div class="mb-2 flex items-center gap-2">
                     <Badge variant="secondary">{{ selectedJob?.assets.length }} 张图片</Badge>
+                    <Badge v-if="selectedJob?.parentJobId" variant="outline" class="gap-1">
+                      <GitBranchIcon class="size-3" />衍生版本
+                    </Badge>
                     <span class="text-xs text-muted-foreground">{{
                       selectedJob && formatDate(selectedJob.createdAt)
                     }}</span>
@@ -633,9 +711,25 @@ onMounted(load)
                     {{ selectedJob?.prompt }}
                   </p>
                 </div>
-                <Button variant="outline" size="sm" @click="selectedJob && reuseJob(selectedJob)">
-                  <RotateCcwIcon data-icon="inline-start" />复用参数
-                </Button>
+                <div class="flex shrink-0 flex-wrap justify-end gap-2">
+                  <Button variant="outline" size="sm" @click="copyPrompt">
+                    <CopyIcon data-icon="inline-start" />复制提示词
+                  </Button>
+                  <Button
+                    v-if="favoriteAssets.length"
+                    variant="outline"
+                    size="sm"
+                    @click="saveAssets(favoriteAssets)"
+                  >
+                    <HeartIcon data-icon="inline-start" />导出收藏
+                  </Button>
+                  <Button variant="outline" size="sm" @click="saveAssets(currentAssets)">
+                    <ImagesIcon data-icon="inline-start" />批量导出
+                  </Button>
+                  <Button variant="outline" size="sm" @click="selectedJob && reuseJob(selectedJob)">
+                    <RotateCcwIcon data-icon="inline-start" />复用参数
+                  </Button>
+                </div>
               </div>
               <div
                 :class="[
@@ -677,6 +771,22 @@ onMounted(load)
                   <div class="flex items-center justify-between p-3">
                     <span class="truncate text-xs text-muted-foreground">{{ asset.name }}</span>
                     <div class="flex items-center gap-1">
+                      <Button
+                        :variant="asset.favorite ? 'secondary' : 'ghost'"
+                        size="icon-sm"
+                        :aria-label="asset.favorite ? '取消收藏' : '收藏图片'"
+                        @click="toggleFavorite(asset)"
+                      >
+                        <HeartIcon :class="asset.favorite && 'fill-current'" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="基于图片继续创作"
+                        @click="continueWithAsset(asset)"
+                      >
+                        <GitBranchIcon />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -869,13 +979,21 @@ onMounted(load)
         :alt="selectedAsset.name"
         class="h-auto max-h-full w-auto max-w-full rounded-2xl object-contain"
       />
-      <Button
-        v-if="selectedAsset"
-        class="absolute bottom-4 right-4"
-        @click="saveAsset(selectedAsset)"
-      >
-        <DownloadIcon data-icon="inline-start" />保存图片
-      </Button>
+      <div v-if="selectedAsset" class="absolute bottom-4 right-4 flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" @click="toggleFavorite(selectedAsset)">
+          <HeartIcon data-icon="inline-start" :class="selectedAsset.favorite && 'fill-current'" />
+          {{ selectedAsset.favorite ? '已收藏' : '收藏' }}
+        </Button>
+        <Button variant="secondary" @click="continueWithAsset(selectedAsset, true)">
+          <SparklesIcon data-icon="inline-start" />生成变体
+        </Button>
+        <Button @click="continueWithAsset(selectedAsset)">
+          <GitBranchIcon data-icon="inline-start" />继续创作
+        </Button>
+        <Button @click="saveAsset(selectedAsset)">
+          <DownloadIcon data-icon="inline-start" />保存图片
+        </Button>
+      </div>
     </DialogContent>
   </Dialog>
 

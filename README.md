@@ -11,6 +11,9 @@ Image Deck is an Electron desktop client for GPT Image 2, built with Vue 3, Type
 - Encrypt the API key with Electron `safeStorage`
 - Persist generated assets and history locally
 - Preview, export, reuse, reveal, and delete generated assets
+- Continue from any generated image or prepare a new variation
+- Track parent jobs, favorite results, and search the local history
+- Batch export all results or only favorites from a generation
 
 ## Development
 

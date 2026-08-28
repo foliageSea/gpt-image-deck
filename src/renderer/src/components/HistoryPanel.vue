@@ -2,12 +2,16 @@
 import type { GenerationJob } from '../../../shared/image-types'
 import {
   Clock3Icon,
+  GitBranchIcon,
+  HeartIcon,
   HistoryIcon,
   ImageIcon,
   MoreHorizontalIcon,
   RotateCcwIcon,
+  SearchIcon,
   Trash2Icon
 } from '@lucide/vue'
+import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,13 +23,24 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 
-defineProps<{
+const props = defineProps<{
   history: GenerationJob[]
   selectedJobId?: string
 }>()
+
+const search = ref('')
+const favoritesOnly = ref(false)
+const filteredHistory = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase()
+  return props.history.filter((job) => {
+    if (favoritesOnly.value && !job.assets.some((asset) => asset.favorite)) return false
+    return !query || job.prompt.toLocaleLowerCase().includes(query)
+  })
+})
 
 const emit = defineEmits<{
   select: [job: GenerationJob]
@@ -51,11 +66,27 @@ function formatDate(value: string): string {
       </div>
       <Badge variant="outline">{{ history.length }}</Badge>
     </div>
+    <div class="flex shrink-0 gap-2 px-3 pb-3">
+      <div class="relative min-w-0 flex-1">
+        <SearchIcon
+          class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input v-model="search" class="pl-8" placeholder="搜索提示词" />
+      </div>
+      <Button
+        :variant="favoritesOnly ? 'secondary' : 'outline'"
+        size="icon"
+        aria-label="只看收藏"
+        @click="favoritesOnly = !favoritesOnly"
+      >
+        <HeartIcon :class="favoritesOnly && 'fill-current'" />
+      </Button>
+    </div>
     <Separator />
     <ScrollArea class="min-h-0 flex-1">
-      <div v-if="history.length" class="flex flex-col gap-2 p-3">
+      <div v-if="filteredHistory.length" class="flex flex-col gap-2 p-3">
         <Card
-          v-for="job in history"
+          v-for="job in filteredHistory"
           :key="job.id"
           :class="[
             'cursor-pointer py-3 transition-colors hover:bg-accent/50',
@@ -78,8 +109,15 @@ function formatDate(value: string): string {
               </div>
               <div class="min-w-0 flex-1">
                 <p class="line-clamp-2 text-xs font-medium leading-5">{{ job.prompt }}</p>
-                <div class="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                <div
+                  class="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground"
+                >
                   <Clock3Icon class="size-3" />{{ formatDate(job.createdAt) }}
+                  <GitBranchIcon v-if="job.parentJobId" class="ml-1 size-3" />
+                  <HeartIcon
+                    v-if="job.assets.some((asset) => asset.favorite)"
+                    class="ml-1 size-3 fill-current"
+                  />
                 </div>
               </div>
               <DropdownMenu>
@@ -106,8 +144,14 @@ function formatDate(value: string): string {
       <Empty v-else class="mt-20">
         <EmptyHeader>
           <EmptyMedia variant="icon"><HistoryIcon /></EmptyMedia>
-          <EmptyTitle>还没有作品</EmptyTitle>
-          <EmptyDescription>完成首次生成后，会在这里建立你的本地作品集。</EmptyDescription>
+          <EmptyTitle>{{ history.length ? '没有匹配的作品' : '还没有作品' }}</EmptyTitle>
+          <EmptyDescription>
+            {{
+              history.length
+                ? '尝试其他关键词或关闭收藏筛选。'
+                : '完成首次生成后，会在这里建立你的本地作品集。'
+            }}
+          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     </ScrollArea>

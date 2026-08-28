@@ -15,6 +15,8 @@ export interface ReferenceImage {
 export interface GenerationRequest {
   prompt: string
   referenceIds: string[]
+  parentJobId?: string
+  sourceAssetId?: string
   n: number
   size: string
   quality: ImageQuality
@@ -30,6 +32,7 @@ export interface GeneratedAsset {
   mimeType: string
   size: number
   url: string
+  favorite?: boolean
 }
 
 export interface TokenUsage {
@@ -43,7 +46,11 @@ export interface GenerationJob {
   createdAt: string
   status: JobStatus
   prompt: string
-  request: Omit<GenerationRequest, 'referenceIds'> & { referenceCount: number }
+  parentJobId?: string
+  sourceAssetId?: string
+  request: Omit<GenerationRequest, 'referenceIds' | 'parentJobId' | 'sourceAssetId'> & {
+    referenceCount: number
+  }
   assets: GeneratedAsset[]
   usage?: TokenUsage
   error?: string
@@ -80,10 +87,13 @@ export interface ImageDeckApi {
   clearApiKey: () => Promise<void>
   testConnection: (input: ConnectionTestInput) => Promise<OperationResult>
   pickReferenceImages: () => Promise<ReferenceImage[]>
+  useAssetAsReference: (assetId: string) => Promise<ReferenceImage>
   generate: (request: GenerationRequest) => Promise<GenerationResult>
   listHistory: () => Promise<GenerationJob[]>
   deleteHistory: (jobId: string) => Promise<void>
   clearHistory: () => Promise<void>
+  setAssetFavorite: (assetId: string, favorite: boolean) => Promise<GenerationJob>
   saveAsset: (assetId: string) => Promise<OperationResult>
+  saveAssets: (assetIds: string[]) => Promise<OperationResult>
   showAsset: (assetId: string) => Promise<void>
 }

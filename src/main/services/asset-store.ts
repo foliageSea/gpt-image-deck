@@ -1,6 +1,6 @@
 import type { GeneratedAsset, ReferenceImage } from '../../shared/image-types'
 import { app, dialog, shell } from 'electron'
-import { copyFile, readFile, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { dataPath, ensureDirectory, removePath } from './storage'
@@ -56,6 +56,21 @@ export function getReferences(
   })
 }
 
+export function useAssetAsReference(id: string): ReferenceImage {
+  const asset = assets.get(id)
+  if (!asset) throw new Error('图片不存在。')
+  const referenceId = randomUUID()
+  const value: ReferenceImage = {
+    id: referenceId,
+    name: asset.value.name,
+    mimeType: asset.value.mimeType,
+    size: asset.value.size,
+    url: assetUrl(referenceId)
+  }
+  references.set(referenceId, { path: asset.path, value })
+  return value
+}
+
 export async function persistGeneratedAsset(
   jobId: string,
   encoded: string,
@@ -106,6 +121,35 @@ export async function saveAsset(id: string): Promise<boolean> {
   if (result.canceled || !result.filePath) return false
   await copyFile(asset.path, result.filePath)
   return true
+}
+
+export async function saveAssets(ids: string[]): Promise<number> {
+  const selected = ids.map((id) => {
+    const asset = assets.get(id)
+    if (!asset) throw new Error('部分图片不存在。')
+    return asset
+  })
+  if (!selected.length) throw new Error('请选择要导出的图片。')
+  const result = await dialog.showOpenDialog({
+    title: '选择导出目录',
+    defaultPath: app.getPath('pictures'),
+    properties: ['openDirectory', 'createDirectory']
+  })
+  if (result.canceled || !result.filePaths[0]) return 0
+  const directory = result.filePaths[0]
+  await mkdir(directory, { recursive: true })
+  await Promise.all(
+    selected.map(async (asset, index) => {
+      const extension = extname(asset.value.name)
+      const stem = basename(asset.value.name, extension)
+      const name =
+        selected.length === 1
+          ? asset.value.name
+          : `${stem}-${asset.jobId.slice(0, 8)}-${index + 1}${extension}`
+      await copyFile(asset.path, join(directory, name))
+    })
+  )
+  return selected.length
 }
 
 export async function showAsset(id: string): Promise<void> {
