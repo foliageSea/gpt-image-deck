@@ -7,18 +7,15 @@ import type {
   ReferenceImage
 } from '../../shared/image-types'
 import {
-  Clock3Icon,
   DownloadIcon,
   FolderOpenIcon,
   HistoryIcon,
   ImageIcon,
   LoaderCircleIcon,
-  MoreHorizontalIcon,
   PlusIcon,
   RotateCcwIcon,
   Settings2Icon,
   SparklesIcon,
-  Trash2Icon,
   UploadCloudIcon,
   WandSparklesIcon,
   CircleAlertIcon,
@@ -26,12 +23,13 @@ import {
   InfoIcon,
   XIcon
 } from '@lucide/vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
+import HistoryPanel from '@/components/HistoryPanel.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -40,13 +38,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import {
   Empty,
   EmptyContent,
@@ -59,6 +50,13 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle
+} from '@/components/ui/sheet'
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -66,7 +64,6 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
 import { Toaster } from '@/components/ui/sonner'
@@ -89,6 +86,10 @@ const history = ref<GenerationJob[]>([])
 const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
 const previewOpen = ref(false)
+const historyOpen = ref(false)
+const pendingDeleteJob = ref<GenerationJob | null>(null)
+const pendingReuseJob = ref<GenerationJob | null>(null)
+const deleting = ref(false)
 type Feedback = { type: 'info' | 'success' | 'error'; title: string; message: string }
 const generationFeedback = ref<Feedback | null>(null)
 const connectionFeedback = ref<Feedback | null>(null)
@@ -113,6 +114,16 @@ const compressionSlider = computed({
     form.compression = value[0] ?? 90
   }
 })
+
+watch(
+  () => form.format,
+  (format) => {
+    if (format === 'jpeg' && form.background === 'transparent') {
+      form.background = 'auto'
+      toast.info('JPEG 不支持透明背景，已切换为自动背景。')
+    }
+  }
+)
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -207,7 +218,7 @@ function selectJob(job: GenerationJob | null): void {
   selectedAsset.value = job?.assets[0] ?? null
 }
 
-function reuseJob(job: GenerationJob): void {
+function applyJobParameters(job: GenerationJob, keepReferences: boolean): void {
   form.prompt = job.prompt
   form.n = job.request.n
   form.size = job.request.size
@@ -216,18 +227,47 @@ function reuseJob(job: GenerationJob): void {
   form.compression = job.request.compression
   form.background = job.request.background
   form.inputFidelity = job.request.inputFidelity
-  toast.success('参数已载入。')
+  if (!keepReferences) {
+    references.value = []
+    form.referenceIds = []
+  }
+  pendingReuseJob.value = null
+  historyOpen.value = false
+  toast.success(
+    job.request.referenceCount
+      ? '提示词和输出参数已载入，请重新选择原参考图片。'
+      : '提示词和参数已载入。'
+  )
 }
 
-async function deleteJob(jobId: string): Promise<void> {
+function reuseJob(job: GenerationJob): void {
+  if (references.value.length || job.request.referenceCount) {
+    pendingReuseJob.value = job
+    return
+  }
+  applyJobParameters(job, false)
+}
+
+async function deleteJob(): Promise<void> {
+  const job = pendingDeleteJob.value
+  if (!job) return
+  deleting.value = true
   try {
-    await api.deleteHistory(jobId)
-    history.value = history.value.filter((job) => job.id !== jobId)
-    if (selectedJob.value?.id === jobId) selectJob(history.value[0] ?? null)
+    await api.deleteHistory(job.id)
+    history.value = history.value.filter((value) => value.id !== job.id)
+    if (selectedJob.value?.id === job.id) selectJob(history.value[0] ?? null)
+    pendingDeleteJob.value = null
     toast.success('历史记录已删除。')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '删除失败。')
+  } finally {
+    deleting.value = false
   }
+}
+
+function selectHistoryJob(job: GenerationJob): void {
+  selectJob(job)
+  historyOpen.value = false
 }
 
 async function saveAsset(asset: GeneratedAsset): Promise<void> {
@@ -272,9 +312,11 @@ async function testSettings(): Promise<void> {
     message: '正在验证接口地址、API Key 和模型访问权限…'
   }
   try {
-    await api.updateSettings({ baseUrl: settingsForm.baseUrl, model: settingsForm.model })
-    if (settingsForm.apiKey.trim()) await api.setApiKey(settingsForm.apiKey)
-    const result = await api.testConnection()
+    const result = await api.testConnection({
+      baseUrl: settingsForm.baseUrl,
+      model: settingsForm.model,
+      apiKey: settingsForm.apiKey.trim() || undefined
+    })
     const message = result.message ?? (result.success ? '连接成功。' : '连接失败。')
     connectionFeedback.value = {
       type: result.success ? 'success' : 'error',
@@ -282,7 +324,6 @@ async function testSettings(): Promise<void> {
       message
     }
     result.success ? toast.success(message) : toast.error(message, { duration: 8000 })
-    settings.value = await api.getSettings()
   } catch (error) {
     const message = error instanceof Error ? error.message : '连接测试失败。'
     connectionFeedback.value = { type: 'error', title: '连接失败', message }
@@ -320,6 +361,15 @@ onMounted(load)
         </div>
       </div>
       <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="xl:hidden"
+          aria-label="打开历史记录"
+          @click="historyOpen = true"
+        >
+          <HistoryIcon data-icon="inline-start" />历史
+        </Button>
         <Badge :variant="settings.hasApiKey ? 'secondary' : 'outline'" class="gap-1.5">
           <span
             :class="[
@@ -327,7 +377,7 @@ onMounted(load)
               settings.hasApiKey ? 'bg-primary' : 'bg-muted-foreground'
             ]"
           />
-          {{ settings.hasApiKey ? settings.model : '未连接' }}
+          {{ settings.hasApiKey ? 'Key 已保存' : '未配置 Key' }}
         </Badge>
         <Button variant="ghost" size="icon" aria-label="连接设置" @click="settingsOpen = true">
           <Settings2Icon />
@@ -530,7 +580,10 @@ onMounted(load)
         />
         <ScrollArea class="relative h-full">
           <div class="flex min-h-[calc(100vh-3.5rem)] flex-col p-6 lg:p-10">
-            <div v-if="generating" class="m-auto grid w-full max-w-3xl grid-cols-2 gap-4">
+            <div
+              v-if="generating && !currentAssets.length"
+              class="m-auto grid w-full max-w-3xl grid-cols-2 gap-4"
+            >
               <Skeleton v-for="index in form.n" :key="index" class="aspect-square rounded-2xl" />
               <div class="col-span-full mt-3 text-center">
                 <p class="text-sm font-medium">正在构建画面</p>
@@ -561,6 +614,13 @@ onMounted(load)
             </Empty>
 
             <div v-else class="m-auto w-full max-w-5xl">
+              <Alert v-if="generating" class="mb-5">
+                <LoaderCircleIcon class="animate-spin" />
+                <AlertTitle>正在生成新作品</AlertTitle>
+                <AlertDescription>
+                  当前作品仍可预览和保存，新结果返回后会自动切换。
+                </AlertDescription>
+              </Alert>
               <div class="mb-5 flex items-end justify-between gap-4">
                 <div class="min-w-0">
                   <div class="mb-2 flex items-center gap-2">
@@ -641,75 +701,83 @@ onMounted(load)
       </section>
 
       <aside class="min-h-0 border-l bg-card/35 max-xl:hidden">
-        <div class="flex h-14 items-center justify-between px-4">
-          <div class="flex items-center gap-2 text-sm font-medium">
-            <HistoryIcon class="size-4" />历史记录
-          </div>
-          <Badge variant="outline">{{ history.length }}</Badge>
-        </div>
-        <Separator />
-        <ScrollArea class="h-[calc(100%-3.5rem)]">
-          <div v-if="history.length" class="flex flex-col gap-2 p-3">
-            <Card
-              v-for="job in history"
-              :key="job.id"
-              :class="[
-                'cursor-pointer py-3 transition-colors hover:bg-accent/50',
-                selectedJob?.id === job.id && 'border-primary/40 bg-primary/5'
-              ]"
-              @click="selectJob(job)"
-            >
-              <CardContent class="px-3">
-                <div class="flex gap-3">
-                  <div class="size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-                    <img
-                      v-if="job.assets[0]"
-                      :src="job.assets[0].url"
-                      alt="历史缩略图"
-                      class="size-full object-cover"
-                    />
-                    <div v-else class="flex size-full items-center justify-center">
-                      <ImageIcon class="size-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <p class="line-clamp-2 text-xs font-medium leading-5">{{ job.prompt }}</p>
-                    <div class="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <Clock3Icon class="size-3" />{{ formatDate(job.createdAt) }}
-                    </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <Button variant="ghost" size="icon-xs" aria-label="历史操作" @click.stop
-                        ><MoreHorizontalIcon
-                      /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuGroup>
-                        <DropdownMenuItem @click="reuseJob(job)"
-                          ><RotateCcwIcon />复用参数</DropdownMenuItem
-                        >
-                        <DropdownMenuItem variant="destructive" @click="deleteJob(job.id)"
-                          ><Trash2Icon />删除</DropdownMenuItem
-                        >
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          <Empty v-else class="mt-20">
-            <EmptyHeader>
-              <EmptyMedia variant="icon"><HistoryIcon /></EmptyMedia>
-              <EmptyTitle>还没有作品</EmptyTitle>
-              <EmptyDescription>完成首次生成后，会在这里建立你的本地作品集。</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </ScrollArea>
+        <HistoryPanel
+          :history="history"
+          :selected-job-id="selectedJob?.id"
+          @select="selectHistoryJob"
+          @reuse="reuseJob"
+          @delete="pendingDeleteJob = $event"
+        />
       </aside>
     </main>
   </div>
+
+  <Sheet v-model:open="historyOpen">
+    <SheetContent class="gap-0 p-0" side="right">
+      <SheetHeader class="sr-only">
+        <SheetTitle>历史记录</SheetTitle>
+        <SheetDescription>查看、复用或删除历史生成任务。</SheetDescription>
+      </SheetHeader>
+      <HistoryPanel
+        :history="history"
+        :selected-job-id="selectedJob?.id"
+        @select="selectHistoryJob"
+        @reuse="reuseJob"
+        @delete="pendingDeleteJob = $event"
+      />
+    </SheetContent>
+  </Sheet>
+
+  <Dialog :open="Boolean(pendingReuseJob)" @update:open="!$event && (pendingReuseJob = null)">
+    <DialogContent :show-close-button="false">
+      <DialogHeader>
+        <DialogTitle>复用这次创作？</DialogTitle>
+        <DialogDescription>
+          <template v-if="pendingReuseJob?.request.referenceCount">
+            这次任务使用了 {{ pendingReuseJob.request.referenceCount }}
+            张参考图。原参考图尚未保存在历史中，载入后需要重新选择。
+          </template>
+          <template v-else-if="references.length">
+            当前已选择
+            {{ references.length }} 张参考图。建议清空，避免把文生图任务意外变成图片编辑。
+          </template>
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button variant="outline" @click="pendingReuseJob = null">取消</Button>
+        <Button
+          v-if="pendingReuseJob && references.length"
+          variant="secondary"
+          @click="applyJobParameters(pendingReuseJob, true)"
+        >
+          保留当前参考图
+        </Button>
+        <Button v-if="pendingReuseJob" @click="applyJobParameters(pendingReuseJob, false)">
+          清空参考图并载入
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog :open="Boolean(pendingDeleteJob)" @update:open="!$event && (pendingDeleteJob = null)">
+    <DialogContent :show-close-button="false">
+      <DialogHeader>
+        <DialogTitle>永久删除这条历史？</DialogTitle>
+        <DialogDescription>
+          任务中的 {{ pendingDeleteJob?.assets.length ?? 0 }} 张本地图片也会被删除，此操作无法撤销。
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button variant="outline" :disabled="deleting" @click="pendingDeleteJob = null"
+          >取消</Button
+        >
+        <Button variant="destructive" :disabled="deleting" @click="deleteJob">
+          <LoaderCircleIcon v-if="deleting" data-icon="inline-start" class="animate-spin" />
+          永久删除
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
   <Dialog v-model:open="settingsOpen">
     <DialogContent class="sm:max-w-lg">

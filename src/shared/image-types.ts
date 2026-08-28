@@ -61,6 +61,10 @@ export interface SettingsUpdate {
   model: string
 }
 
+export interface ConnectionTestInput extends SettingsUpdate {
+  apiKey?: string
+}
+
 export interface OperationResult {
   success: boolean
   message?: string
@@ -74,7 +78,7 @@ export interface ImageDeckApi {
   updateSettings: (settings: SettingsUpdate) => Promise<AppSettings>
   setApiKey: (apiKey: string) => Promise<OperationResult>
   clearApiKey: () => Promise<void>
-  testConnection: () => Promise<OperationResult>
+  testConnection: (input: ConnectionTestInput) => Promise<OperationResult>
   pickReferenceImages: () => Promise<ReferenceImage[]>
   generate: (request: GenerationRequest) => Promise<GenerationResult>
   listHistory: () => Promise<GenerationJob[]>

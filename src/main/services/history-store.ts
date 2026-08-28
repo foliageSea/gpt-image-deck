@@ -19,19 +19,25 @@ export async function listHistory(): Promise<GenerationJob[]> {
 
 export async function addHistory(job: GenerationJob): Promise<void> {
   const values = await history()
-  values.unshift(job)
-  cache = values.slice(0, 200)
-  await writeJson(historyPath(), cache)
+  const next = [job, ...values].slice(0, 200)
+  const removed = values.slice(199)
+  await writeJson(historyPath(), next)
+  cache = next
+  await Promise.allSettled(removed.map((value) => deleteJobAssets(value.id)))
 }
 
 export async function deleteHistory(jobId: string): Promise<void> {
-  cache = (await history()).filter((job) => job.id !== jobId)
-  await Promise.all([writeJson(historyPath(), cache), deleteJobAssets(jobId)])
+  const values = await history()
+  if (!values.some((job) => job.id === jobId)) throw new Error('历史记录不存在。')
+  const next = values.filter((job) => job.id !== jobId)
+  await writeJson(historyPath(), next)
+  cache = next
+  await Promise.allSettled([deleteJobAssets(jobId)])
 }
 
 export async function clearHistory(): Promise<void> {
   const values = await history()
-  await Promise.all(values.map((job) => deleteJobAssets(job.id)))
+  await writeJson(historyPath(), [])
   cache = []
-  await writeJson(historyPath(), cache)
+  await Promise.allSettled(values.map((job) => deleteJobAssets(job.id)))
 }

@@ -1,5 +1,5 @@
 import type { IpcMainInvokeEvent } from 'electron'
-import type { GenerationRequest, SettingsUpdate } from '../shared/image-types'
+import type { ConnectionTestInput, GenerationRequest, SettingsUpdate } from '../shared/image-types'
 import { ipcMain } from 'electron'
 import { clearApiKey, hasApiKey, isSecureStorageAvailable, setApiKey } from './services/credentials'
 import { clearHistory, deleteHistory, listHistory } from './services/history-store'
@@ -26,6 +26,16 @@ function handle<T extends unknown[], R>(
     validateSender(event)
     return listener(event, ...args)
   })
+}
+
+function requireUuid(value: unknown, label: string): string {
+  if (
+    typeof value !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ) {
+    throw new Error(`${label} ID 无效。`)
+  }
+  return value
 }
 
 export function registerIpcHandlers(): void {
@@ -58,9 +68,9 @@ export function registerIpcHandlers(): void {
     }
   })
   handle('credentials:clear', async () => clearApiKey())
-  handle('connection:test', async () => {
+  handle<[ConnectionTestInput], unknown>('connection:test', async (_, input) => {
     try {
-      await testConnection()
+      await testConnection(input)
       return { success: true, message: '连接成功。' }
     } catch (error) {
       return { success: false, message: error instanceof Error ? error.message : '连接失败。' }
@@ -77,13 +87,14 @@ export function registerIpcHandlers(): void {
   })
   handle('history:list', async () => listHistory())
   handle<[string], void>('history:delete', async (_, jobId) => {
-    if (typeof jobId !== 'string') throw new Error('历史记录 ID 无效。')
-    await deleteHistory(jobId)
+    await deleteHistory(requireUuid(jobId, '历史记录'))
   })
   handle('history:clear', async () => clearHistory())
   handle<[string], unknown>('asset:save', async (_, assetId) => ({
-    success: await saveAsset(assetId),
+    success: await saveAsset(requireUuid(assetId, '图片')),
     message: '图片已保存。'
   }))
-  handle<[string], void>('asset:show', async (_, assetId) => showAsset(assetId))
+  handle<[string], void>('asset:show', async (_, assetId) =>
+    showAsset(requireUuid(assetId, '图片'))
+  )
 }

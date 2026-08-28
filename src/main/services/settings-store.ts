@@ -17,7 +17,7 @@ export async function getStoredSettings(): Promise<StoredSettings> {
   return readJson(settingsPath(), defaults)
 }
 
-export async function updateStoredSettings(input: SettingsUpdate): Promise<StoredSettings> {
+export function normalizeSettings(input: SettingsUpdate): StoredSettings {
   const url = new URL(input.baseUrl.trim())
 
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
@@ -37,7 +37,11 @@ export async function updateStoredSettings(input: SettingsUpdate): Promise<Store
   const model = input.model.trim()
   if (!model || model.length > 100) throw new Error('请输入有效的模型名称。')
 
-  const settings = { baseUrl, model }
+  return { baseUrl, model }
+}
+
+export async function updateStoredSettings(input: SettingsUpdate): Promise<StoredSettings> {
+  const settings = normalizeSettings(input)
   await writeJson(settingsPath(), settings)
   return settings
 }

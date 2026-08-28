@@ -1,10 +1,20 @@
-import type { GenerationJob, GenerationRequest, TokenUsage } from '../../shared/image-types'
+import type {
+  ConnectionTestInput,
+  GenerationJob,
+  GenerationRequest,
+  TokenUsage
+} from '../../shared/image-types'
 import { createReadStream } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import OpenAI, { APIError, toFile } from 'openai'
 import { getApiKey } from './credentials'
-import { getStoredSettings } from './settings-store'
-import { getReferences, persistGeneratedAsset, persistGeneratedBytes } from './asset-store'
+import { getStoredSettings, normalizeSettings } from './settings-store'
+import {
+  deleteJobAssets,
+  getReferences,
+  persistGeneratedAsset,
+  persistGeneratedBytes
+} from './asset-store'
 import { addHistory } from './history-store'
 
 const validSizes = new Set(['auto', '1024x1024', '1536x1024', '1024x1536'])
@@ -51,10 +61,10 @@ export function getImageErrorMessage(error: unknown): string {
   return mapError(error)
 }
 
-export async function testConnection(): Promise<void> {
-  const apiKey = await getApiKey()
+export async function testConnection(input: ConnectionTestInput): Promise<void> {
+  const apiKey = input.apiKey?.trim() || (await getApiKey())
   if (!apiKey) throw new Error('请先设置 API Key。')
-  const settings = await getStoredSettings()
+  const settings = normalizeSettings(input)
 
   try {
     const response = await fetch(`${settings.baseUrl}/images/generations`, {
@@ -130,7 +140,7 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
 
     const results = response.data ?? []
     if (!results.length) throw new Error('接口没有返回图片数据。')
-    const assets = await Promise.all(
+    const assetResults = await Promise.allSettled(
       results.map(async (item, index) => {
         if (item.b64_json) return persistGeneratedAsset(id, item.b64_json, request.format, index)
         if (item.url) {
@@ -146,6 +156,14 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
         throw new Error('接口返回结果中没有 b64_json 或 url。')
       })
     )
+    const assets = assetResults.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : []
+    )
+    if (!assets.length) {
+      await deleteJobAssets(id)
+      const failure = assetResults.find((result) => result.status === 'rejected')
+      throw failure && failure.status === 'rejected' ? failure.reason : new Error('图片保存失败。')
+    }
     const rawUsage = 'usage' in response ? response.usage : undefined
     const usage: TokenUsage | undefined = rawUsage
       ? {
@@ -164,7 +182,12 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
       assets,
       usage
     }
-    await addHistory(job)
+    try {
+      await addHistory(job)
+    } catch (error) {
+      await deleteJobAssets(id)
+      throw error
+    }
     return job
   } catch (error) {
     throw new Error(mapError(error))
