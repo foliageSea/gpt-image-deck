@@ -1003,6 +1003,7 @@ onMounted(load)
                       :src="asset.url"
                       :alt="asset.name"
                       class="size-full object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+                      draggable="false"
                     />
                     <div
                       class="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-between bg-background/80 p-3 backdrop-blur-md transition-transform group-hover:translate-y-0"
@@ -1460,6 +1461,7 @@ onMounted(load)
         :src="selectedAsset.url"
         :alt="selectedAsset.name"
         class="h-auto max-h-full w-auto max-w-full object-contain"
+        draggable="false"
       />
       <div v-if="selectedAsset" class="absolute bottom-4 right-4 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" @click="toggleFavorite(selectedAsset)">

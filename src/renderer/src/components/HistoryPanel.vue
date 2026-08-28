@@ -116,6 +116,7 @@ function formatDate(value: string): string {
                   :src="job.assets[0].url"
                   alt="历史缩略图"
                   class="size-full object-cover"
+                  draggable="false"
                 />
                 <div v-else class="flex size-full items-center justify-center">
                   <ImageIcon class="size-4 text-muted-foreground" />
