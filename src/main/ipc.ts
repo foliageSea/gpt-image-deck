@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ConnectionTestInput, GenerationRequest, SettingsUpdate } from '../shared/image-types'
-import { ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification } from 'electron'
 import { clearApiKey, hasApiKey, isSecureStorageAvailable, setApiKey } from './services/credentials'
 import {
   clearHistory,
@@ -49,6 +49,28 @@ function requireUuid(value: unknown, label: string): string {
   return value
 }
 
+function notifyGenerationComplete(event: IpcMainInvokeEvent, imageCount: number): void {
+  if (!Notification.isSupported()) return
+
+  try {
+    const notification = new Notification({
+      title: '图片生成完成',
+      body: `已生成 ${imageCount} 张图片并保存到本地历史。`
+    })
+    const window = BrowserWindow.fromWebContents(event.sender)
+    notification.on('click', () => {
+      if (!window || window.isDestroyed()) return
+      if (window.isMinimized()) window.restore()
+      window.show()
+      window.focus()
+      app.focus({ steal: true })
+    })
+    notification.show()
+  } catch (error) {
+    console.error('Failed to show generation notification:', error)
+  }
+}
+
 export function registerIpcHandlers(): void {
   handle('settings:get', async () => {
     const settings = await getStoredSettings()
@@ -92,9 +114,11 @@ export function registerIpcHandlers(): void {
   handle<[string], unknown>('references:from-asset', async (_, assetId) =>
     useAssetAsReference(requireUuid(assetId, '图片'))
   )
-  handle<[GenerationRequest], unknown>('images:generate', async (_, request) => {
+  handle<[GenerationRequest], unknown>('images:generate', async (event, request) => {
     try {
-      return { success: true, job: await generateImage(request) }
+      const job = await generateImage(request)
+      notifyGenerationComplete(event, job.assets.length)
+      return { success: true, job }
     } catch (error) {
       return { success: false, message: getImageErrorMessage(error) }
     }
