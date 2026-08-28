@@ -338,8 +338,8 @@ onMounted(load)
     <main
       class="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_280px] max-xl:grid-cols-[300px_minmax(0,1fr)]"
     >
-      <aside class="min-h-0 border-r bg-card/35">
-        <ScrollArea class="h-full">
+      <aside class="flex min-h-0 flex-col border-r bg-card/35">
+        <ScrollArea class="min-h-0 flex-1">
           <div class="flex flex-col gap-6 p-4">
             <div>
               <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary">Create</p>
@@ -511,14 +511,15 @@ onMounted(load)
               <AlertTitle>{{ generationFeedback.title }}</AlertTitle>
               <AlertDescription>{{ generationFeedback.message }}</AlertDescription>
             </Alert>
-
-            <Button size="lg" class="w-full" :disabled="!canGenerate" @click="generate">
-              <LoaderCircleIcon v-if="generating" data-icon="inline-start" class="animate-spin" />
-              <SparklesIcon v-else data-icon="inline-start" />
-              {{ generating ? '正在生成…' : references.length ? '编辑图片' : '生成图片' }}
-            </Button>
           </div>
         </ScrollArea>
+        <div class="shrink-0 border-t bg-card/90 p-4 backdrop-blur-xl">
+          <Button size="lg" class="w-full" :disabled="!canGenerate" @click="generate">
+            <LoaderCircleIcon v-if="generating" data-icon="inline-start" class="animate-spin" />
+            <SparklesIcon v-else data-icon="inline-start" />
+            {{ generating ? '正在生成…' : references.length ? '编辑图片' : '生成图片' }}
+          </Button>
+        </div>
       </aside>
 
       <section
@@ -577,15 +578,26 @@ onMounted(load)
                 </Button>
               </div>
               <div
-                :class="['grid gap-4', currentAssets.length === 1 ? 'grid-cols-1' : 'grid-cols-2']"
+                :class="[
+                  'grid gap-4',
+                  currentAssets.length === 1
+                    ? 'h-[calc(100dvh-15rem)] min-h-80 grid-cols-1'
+                    : 'grid-cols-2'
+                ]"
               >
                 <Card
                   v-for="asset in currentAssets"
                   :key="asset.id"
-                  class="group overflow-hidden py-0"
+                  :class="[
+                    'group overflow-hidden py-0',
+                    currentAssets.length === 1 && 'flex h-full min-h-0 flex-col'
+                  ]"
                 >
                   <button
-                    class="relative block aspect-square w-full overflow-hidden bg-muted"
+                    :class="[
+                      'relative block w-full overflow-hidden bg-muted',
+                      currentAssets.length === 1 ? 'min-h-0 flex-1' : 'aspect-square'
+                    ]"
                     @click="openPreview(asset)"
                   >
                     <img
@@ -776,7 +788,9 @@ onMounted(load)
   </Dialog>
 
   <Dialog v-model:open="previewOpen">
-    <DialogContent class="max-w-[92vw] border-none bg-transparent p-0 shadow-none">
+    <DialogContent
+      class="flex h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-none items-center justify-center border-none bg-transparent p-0 shadow-none sm:max-w-none"
+    >
       <DialogHeader class="sr-only"
         ><DialogTitle>图片预览</DialogTitle
         ><DialogDescription>查看生成结果</DialogDescription></DialogHeader
@@ -785,7 +799,7 @@ onMounted(load)
         v-if="selectedAsset"
         :src="selectedAsset.url"
         :alt="selectedAsset.name"
-        class="max-h-[86vh] w-full rounded-2xl object-contain"
+        class="h-auto max-h-full w-auto max-w-full rounded-2xl object-contain"
       />
       <Button
         v-if="selectedAsset"
