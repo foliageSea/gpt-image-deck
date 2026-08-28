@@ -743,7 +743,7 @@ onMounted(load)
                   v-for="asset in currentAssets"
                   :key="asset.id"
                   :class="[
-                    'group overflow-hidden py-0',
+                    'group overflow-hidden rounded-none py-0',
                     currentAssets.length === 1 && 'flex h-full min-h-0 flex-col'
                   ]"
                 >
@@ -968,6 +968,9 @@ onMounted(load)
   <Dialog v-model:open="previewOpen">
     <DialogContent
       class="flex h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-none items-center justify-center border-none bg-transparent p-0 shadow-none sm:max-w-none"
+      :close-on-overlay-click="true"
+      @close="previewOpen = false"
+      @click.self="previewOpen = false"
     >
       <DialogHeader class="sr-only"
         ><DialogTitle>图片预览</DialogTitle
@@ -977,7 +980,7 @@ onMounted(load)
         v-if="selectedAsset"
         :src="selectedAsset.url"
         :alt="selectedAsset.name"
-        class="h-auto max-h-full w-auto max-w-full rounded-2xl object-contain"
+        class="h-auto max-h-full w-auto max-w-full object-contain"
       />
       <div v-if="selectedAsset" class="absolute bottom-4 right-4 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" @click="toggleFavorite(selectedAsset)">
