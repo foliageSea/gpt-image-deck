@@ -93,10 +93,22 @@ export interface ProjectState {
   currentProjectId: string
 }
 
+export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
+
+export interface WindowControlsApi {
+  platform: DesktopPlatform
+  minimize: () => Promise<void>
+  toggleMaximize: () => Promise<boolean>
+  close: () => Promise<void>
+  isMaximized: () => Promise<boolean>
+  onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
+}
+
 export type GenerationResult =
   { success: true; job: GenerationJob } | { success: false; message: string }
 
 export interface ImageDeckApi {
+  windowControls: WindowControlsApi
   getSettings: () => Promise<AppSettings>
   updateSettings: (settings: SettingsUpdate) => Promise<AppSettings>
   setApiKey: (apiKey: string) => Promise<OperationResult>

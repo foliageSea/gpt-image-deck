@@ -55,6 +55,12 @@ function requireUuid(value: unknown, label: string): string {
   return value
 }
 
+function getSenderWindow(event: IpcMainInvokeEvent): BrowserWindow {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || window.isDestroyed()) throw new Error('应用窗口不可用。')
+  return window
+}
+
 function notifyGenerationComplete(event: IpcMainInvokeEvent, imageCount: number): void {
   if (!Notification.isSupported()) return
 
@@ -77,6 +83,19 @@ function notifyGenerationComplete(event: IpcMainInvokeEvent, imageCount: number)
 }
 
 export function registerIpcHandlers(): void {
+  handle('window:minimize', async (event) => {
+    getSenderWindow(event).minimize()
+  })
+  handle('window:toggle-maximize', async (event) => {
+    const window = getSenderWindow(event)
+    window.isMaximized() ? window.unmaximize() : window.maximize()
+    return window.isMaximized()
+  })
+  handle('window:close', async (event) => {
+    getSenderWindow(event).close()
+  })
+  handle('window:is-maximized', async (event) => getSenderWindow(event).isMaximized())
+
   handle('settings:get', async () => {
     const settings = await getStoredSettings()
     return {

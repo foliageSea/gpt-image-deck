@@ -10,6 +10,7 @@ import { MiniMap } from '@vue-flow/minimap'
 import { GitBranchIcon, XIcon } from '@lucide/vue'
 import { computed } from 'vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
+import WindowControls from './WindowControls.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
@@ -17,6 +18,8 @@ const props = defineProps<{
   history: GenerationJob[]
   selectedJobId?: string
 }>()
+
+const isMac = window.imageDeck.windowControls.platform === 'darwin'
 
 const emit = defineEmits<{
   close: []
@@ -80,7 +83,10 @@ function selectNode({ node }: NodeMouseEvent): void {
 <template>
   <section class="flex h-screen flex-col bg-background">
     <header
-      class="flex h-16 shrink-0 items-center gap-3 border-b bg-card/80 px-5 backdrop-blur-xl [-webkit-app-region:drag]"
+      :class="[
+        'flex h-14 shrink-0 items-center gap-3 border-b bg-card/80 backdrop-blur-xl [-webkit-app-region:drag]',
+        isMac ? 'pl-24' : 'pl-5'
+      ]"
     >
       <div
         class="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"
@@ -92,11 +98,17 @@ function selectNode({ node }: NodeMouseEvent): void {
         <p class="text-xs text-muted-foreground">拖动画布探索分支，选择任意节点继续生成</p>
       </div>
       <Badge variant="outline" class="ml-2">{{ history.length }} 个节点</Badge>
-      <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+      <div
+        :class="[
+          'ml-auto flex h-full items-center gap-2 [-webkit-app-region:no-drag]',
+          isMac && 'pr-3'
+        ]"
+      >
         <span class="hidden text-xs text-muted-foreground sm:inline">双击节点返回作品</span>
         <Button variant="outline" size="sm" @click="emit('close')">
           <XIcon data-icon="inline-start" />关闭流程
         </Button>
+        <WindowControls :class="!isMac && 'ml-1'" />
       </div>
     </header>
 

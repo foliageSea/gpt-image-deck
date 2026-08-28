@@ -35,6 +35,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import HistoryPanel from '@/components/HistoryPanel.vue'
 import GenerationFlow from '@/components/GenerationFlow.vue'
+import WindowControls from '@/components/WindowControls.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -80,6 +81,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 const api = window.imageDeck
+const isMac = api.windowControls.platform === 'darwin'
 const settings = ref<AppSettings>({
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-image-2',
@@ -627,7 +629,10 @@ onMounted(load)
   />
   <div v-else class="flex h-screen flex-col bg-background">
     <header
-      class="flex h-14 shrink-0 items-center border-b bg-card/70 px-4 backdrop-blur-xl [-webkit-app-region:drag]"
+      :class="[
+        'flex h-14 shrink-0 items-center border-b bg-card/70 backdrop-blur-xl [-webkit-app-region:drag]',
+        isMac ? 'pl-24' : 'pl-4'
+      ]"
     >
       <div class="flex items-center gap-3">
         <div
@@ -642,7 +647,12 @@ onMounted(load)
           </p>
         </div>
       </div>
-      <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+      <div
+        :class="[
+          'ml-auto flex h-full items-center gap-2 [-webkit-app-region:no-drag]',
+          isMac && 'pr-3'
+        ]"
+      >
         <Select
           :model-value="projectState.currentProjectId"
           :disabled="changingProject || projectBusy"
@@ -697,6 +707,7 @@ onMounted(load)
         <Button variant="ghost" size="icon" aria-label="连接设置" @click="settingsOpen = true">
           <Settings2Icon />
         </Button>
+        <WindowControls :class="!isMac && 'ml-1'" />
       </div>
     </header>
 

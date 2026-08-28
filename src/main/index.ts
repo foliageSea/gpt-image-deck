@@ -21,6 +21,12 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hidden',
+          trafficLightPosition: { x: 16, y: 20 }
+        }
+      : { frame: false }),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -33,6 +39,12 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+
+  const sendMaximizedState = (): void => {
+    mainWindow.webContents.send('window:maximized-change', mainWindow.isMaximized())
+  }
+  mainWindow.on('maximize', sendMaximizedState)
+  mainWindow.on('unmaximize', sendMaximizedState)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     const url = new URL(details.url)

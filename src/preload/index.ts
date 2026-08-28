@@ -3,6 +3,20 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Custom APIs for renderer
 const api: ImageDeckApi = {
+  windowControls: {
+    platform: process.platform as ImageDeckApi['windowControls']['platform'],
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    onMaximizedChange: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, maximized: boolean): void => {
+        callback(maximized)
+      }
+      ipcRenderer.on('window:maximized-change', listener)
+      return () => ipcRenderer.removeListener('window:maximized-change', listener)
+    }
+  },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
   setApiKey: (apiKey) => ipcRenderer.invoke('credentials:set', apiKey),
