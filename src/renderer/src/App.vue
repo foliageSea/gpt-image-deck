@@ -772,9 +772,6 @@ onMounted(load)
         </div>
         <div class="hidden sm:block">
           <h1 class="text-sm font-semibold tracking-tight">Image Deck</h1>
-          <p class="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            GPT Image Studio
-          </p>
         </div>
       </div>
       <div

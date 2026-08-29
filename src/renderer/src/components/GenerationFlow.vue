@@ -190,12 +190,12 @@ function selectNode({ node }: NodeMouseEvent): void {
       ]"
     >
       <div
-        class="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"
+        class="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15"
       >
         <GitBranchIcon />
       </div>
       <div>
-        <h2 class="text-sm font-semibold">创作流程</h2>
+        <h2 class="text-sm font-semibold tracking-tight">Image Deck</h2>
       </div>
       <Badge variant="outline" class="ml-2">
         {{ history.length + (pendingGeneration ? 1 : 0) }} 个节点
