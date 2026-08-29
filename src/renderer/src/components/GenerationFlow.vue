@@ -20,6 +20,7 @@ import {
   Settings2Icon
 } from '@lucide/vue'
 import { computed, nextTick, shallowRef } from 'vue'
+import GenerationFlowMiniMapNode from './GenerationFlowMiniMapNode.vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
 import GenerationFlowLoadingNode from './GenerationFlowLoadingNode.vue'
 import WindowControls from './WindowControls.vue'
@@ -266,7 +267,17 @@ function selectNode({ node }: NodeMouseEvent): void {
           <GenerationFlowLoadingNode :data="data" />
         </template>
         <Background :gap="24" :size="1.25" pattern-color="var(--border)" />
-        <MiniMap pannable zoomable />
+        <MiniMap pannable zoomable aria-label="流程全局预览">
+          <template #node-generation="nodeProps">
+            <GenerationFlowMiniMapNode
+              v-bind="nodeProps"
+              :image-url="history.find((job) => job.id === nodeProps.id)?.assets[0]?.url"
+            />
+          </template>
+          <template #node-generation-loading="nodeProps">
+            <GenerationFlowMiniMapNode v-bind="nodeProps" loading />
+          </template>
+        </MiniMap>
         <Controls :show-interactive="false" />
       </VueFlow>
       <TooltipProvider>
@@ -372,5 +383,41 @@ function selectNode({ node }: NodeMouseEvent): void {
 
 .generation-flow .vue-flow__minimap-mask {
   fill: color-mix(in oklab, var(--background) 75%, transparent);
+}
+
+.generation-flow-minimap-node {
+  cursor: pointer;
+}
+
+.generation-flow-minimap-node__background {
+  fill: var(--muted);
+}
+
+.generation-flow-minimap-node__placeholder {
+  fill: var(--muted-foreground);
+  opacity: 0.55;
+}
+
+.generation-flow-minimap-node__loading circle {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 7;
+  opacity: 0.75;
+}
+
+.generation-flow-minimap-node__loading circle:last-child {
+  fill: var(--primary);
+  stroke: none;
+}
+
+.generation-flow-minimap-node__border {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 5;
+}
+
+.generation-flow-minimap-node.selected .generation-flow-minimap-node__border {
+  stroke: var(--primary);
+  stroke-width: 8;
 }
 </style>
