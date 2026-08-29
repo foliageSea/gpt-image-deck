@@ -68,6 +68,8 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  app.dock?.setIcon(icon)
+
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.foliage')
 
