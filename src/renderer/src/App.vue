@@ -4,6 +4,8 @@ import type {
   GeneratedAsset,
   GenerationJob,
   GenerationRequest,
+  PromptTemplate,
+  PromptTemplateInput,
   Project,
   ProjectState,
   ReferenceImage
@@ -28,6 +30,7 @@ import {
   WandSparklesIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  BookOpenIcon,
   InfoIcon,
   XIcon
 } from '@lucide/vue'
@@ -35,6 +38,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import HistoryPanel from '@/components/HistoryPanel.vue'
 import GenerationFlow from '@/components/GenerationFlow.vue'
+import PromptLibraryDialog from '@/components/PromptLibraryDialog.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -108,6 +112,9 @@ const previewOpen = ref(false)
 const historyOpen = ref(false)
 const flowOpen = ref(true)
 const flowGenerating = ref(false)
+const prompts = ref<PromptTemplate[]>([])
+const promptsOpen = ref(false)
+const promptTarget = ref<'main' | 'flow'>('main')
 const pendingDeleteJob = ref<GenerationJob | null>(null)
 const pendingReuseJob = ref<GenerationJob | null>(null)
 const deleting = ref(false)
@@ -181,9 +188,14 @@ function formatBytes(bytes: number): string {
 
 async function load(): Promise<void> {
   try {
-    const [nextSettings, nextProjects] = await Promise.all([api.getSettings(), api.getProjects()])
+    const [nextSettings, nextProjects, nextPrompts] = await Promise.all([
+      api.getSettings(),
+      api.getProjects(),
+      api.listPrompts()
+    ])
     const nextHistory = await api.listHistory(nextProjects.currentProjectId)
     settings.value = nextSettings
+    prompts.value = nextPrompts
     projectState.value = nextProjects
     form.projectId = nextProjects.currentProjectId
     history.value = nextHistory
@@ -530,6 +542,46 @@ function resetParameters(): void {
   toast.success('输出参数已重置。')
 }
 
+function openPromptLibrary(target: 'main' | 'flow'): void {
+  promptTarget.value = target
+  promptsOpen.value = true
+}
+
+function fillPrompt(prompt: PromptTemplate): void {
+  if (promptTarget.value === 'flow' && flowCreation.value)
+    flowCreation.value.prompt = prompt.content
+  else form.prompt = prompt.content
+  promptsOpen.value = false
+  toast.success(`已填入“${prompt.title}”。`)
+}
+
+async function createPrompt(input: PromptTemplateInput): Promise<void> {
+  try {
+    prompts.value = await api.createPrompt(input)
+    toast.success('提示词已保存。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '提示词保存失败。')
+  }
+}
+
+async function updatePrompt(id: string, input: PromptTemplateInput): Promise<void> {
+  try {
+    prompts.value = await api.updatePrompt(id, input)
+    toast.success('提示词已更新。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '提示词更新失败。')
+  }
+}
+
+async function deletePrompt(id: string): Promise<void> {
+  try {
+    prompts.value = await api.deletePrompt(id)
+    toast.success('提示词已删除。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '提示词删除失败。')
+  }
+}
+
 function reuseJob(job: GenerationJob): void {
   if (references.value.length || job.request.referenceCount) {
     pendingReuseJob.value = job
@@ -773,7 +825,17 @@ onMounted(load)
 
             <FieldGroup>
               <Field>
-                <FieldLabel for="prompt">提示词</FieldLabel>
+                <div class="flex items-center justify-between">
+                  <FieldLabel for="prompt">提示词</FieldLabel>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    type="button"
+                    @click="openPromptLibrary('main')"
+                  >
+                    <BookOpenIcon data-icon="inline-start" />提示词库
+                  </Button>
+                </div>
                 <Textarea
                   id="prompt"
                   v-model="form.prompt"
@@ -1321,7 +1383,18 @@ onMounted(load)
         </div>
         <FieldGroup>
           <Field>
-            <FieldLabel for="flow-prompt">提示词</FieldLabel>
+            <div class="flex items-center justify-between">
+              <FieldLabel for="flow-prompt">提示词</FieldLabel>
+              <Button
+                variant="ghost"
+                size="xs"
+                type="button"
+                :disabled="flowGenerating"
+                @click="openPromptLibrary('flow')"
+              >
+                <BookOpenIcon data-icon="inline-start" />提示词库
+              </Button>
+            </div>
             <Textarea
               id="flow-prompt"
               v-model="flowCreation.prompt"
@@ -1459,6 +1532,16 @@ onMounted(load)
       </DialogFooter>
     </DialogContent>
   </Dialog>
+
+  <PromptLibraryDialog
+    v-model:open="promptsOpen"
+    :prompts="prompts"
+    :target-label="promptTarget === 'flow' ? '流程节点' : '创作输入框'"
+    @select="fillPrompt"
+    @create="createPrompt"
+    @update="updatePrompt"
+    @delete="deletePrompt"
+  />
 
   <Dialog v-model:open="settingsOpen">
     <DialogContent class="sm:max-w-lg">

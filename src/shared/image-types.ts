@@ -94,6 +94,19 @@ export interface ProjectState {
   currentProjectId: string
 }
 
+export interface PromptTemplate {
+  id: string
+  title: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PromptTemplateInput {
+  title: string
+  content: string
+}
+
 export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
 
 export interface WindowControlsApi {
@@ -124,6 +137,10 @@ export interface ImageDeckApi {
   createProject: (name: string) => Promise<ProjectState>
   selectProject: (projectId: string) => Promise<ProjectState>
   deleteProject: (projectId: string) => Promise<ProjectState>
+  listPrompts: () => Promise<PromptTemplate[]>
+  createPrompt: (input: PromptTemplateInput) => Promise<PromptTemplate[]>
+  updatePrompt: (id: string, input: PromptTemplateInput) => Promise<PromptTemplate[]>
+  deletePrompt: (id: string) => Promise<PromptTemplate[]>
   listHistory: (projectId: string) => Promise<GenerationJob[]>
   deleteHistory: (jobId: string) => Promise<void>
   clearHistory: (projectId: string) => Promise<void>

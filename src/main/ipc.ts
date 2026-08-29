@@ -1,5 +1,10 @@
 import type { IpcMainInvokeEvent } from 'electron'
-import type { ConnectionTestInput, GenerationRequest, SettingsUpdate } from '../shared/image-types'
+import type {
+  ConnectionTestInput,
+  GenerationRequest,
+  PromptTemplateInput,
+  SettingsUpdate
+} from '../shared/image-types'
 import { BrowserWindow, ipcMain, Notification } from 'electron'
 import { clearApiKey, hasApiKey, isSecureStorageAvailable, setApiKey } from './services/credentials'
 import {
@@ -15,6 +20,7 @@ import {
   getProjectState,
   selectProject
 } from './services/project-store'
+import { createPrompt, deletePrompt, listPrompts, updatePrompt } from './services/prompt-store'
 import {
   backgroundImageUrl,
   clearBackgroundImage,
@@ -195,6 +201,14 @@ export function registerIpcHandlers(): void {
     await clearHistory(id)
     return deleteProject(id)
   })
+  handle('prompts:list', async () => listPrompts())
+  handle<[PromptTemplateInput], unknown>('prompts:create', async (_, input) => createPrompt(input))
+  handle<[string, PromptTemplateInput], unknown>('prompts:update', async (_, promptId, input) =>
+    updatePrompt(requireUuid(promptId, '提示词'), input)
+  )
+  handle<[string], unknown>('prompts:delete', async (_, promptId) =>
+    deletePrompt(requireUuid(promptId, '提示词'))
+  )
   handle<[string], unknown>('history:list', async (_, projectId) =>
     listHistory(requireUuid(projectId, '项目'))
   )
