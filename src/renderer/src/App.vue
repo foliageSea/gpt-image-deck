@@ -1124,7 +1124,7 @@ onMounted(load)
                   v-for="asset in currentAssets"
                   :key="asset.id"
                   :class="[
-                    'group overflow-hidden rounded-none py-0',
+                    'group overflow-hidden rounded-xl bg-card/70 py-0 backdrop-blur-xl',
                     currentAssets.length === 1 && 'flex h-full min-h-0 flex-col'
                   ]"
                 >
