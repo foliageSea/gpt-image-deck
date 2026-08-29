@@ -748,6 +748,7 @@ onMounted(load)
     @manage-projects="projectsOpen = true"
     @delete="pendingDeleteJob = $event"
     @cancel-generation="cancelFlowGeneration"
+    @open-settings="settingsOpen = true"
   />
   <div
     v-else
@@ -824,18 +825,6 @@ onMounted(load)
         >
           <HistoryIcon data-icon="inline-start" />历史
         </Button>
-        <Badge
-          :variant="settings.hasApiKey ? 'secondary' : 'outline'"
-          class="hidden gap-1.5 md:flex"
-        >
-          <span
-            :class="[
-              'size-1.5 rounded-full',
-              settings.hasApiKey ? 'bg-primary' : 'bg-muted-foreground'
-            ]"
-          />
-          {{ settings.hasApiKey ? 'Key 已保存' : '未配置 Key' }}
-        </Badge>
         <Button variant="ghost" size="icon" aria-label="连接设置" @click="settingsOpen = true">
           <Settings2Icon />
         </Button>

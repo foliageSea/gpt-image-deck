@@ -16,7 +16,8 @@ import {
   ImagePlusIcon,
   LayoutDashboardIcon,
   LayoutGridIcon,
-  PlusIcon
+  PlusIcon,
+  Settings2Icon
 } from '@lucide/vue'
 import { computed, nextTick, shallowRef } from 'vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
@@ -62,6 +63,7 @@ const emit = defineEmits<{
   manageProjects: []
   delete: [job: GenerationJob]
   cancelGeneration: []
+  openSettings: []
 }>()
 
 function createLayout(): Graph {
@@ -235,6 +237,9 @@ function selectNode({ node }: NodeMouseEvent): void {
         </Button>
         <Button variant="secondary" size="sm" @click="emit('close')">
           <LayoutDashboardIcon data-icon="inline-start" />工作台模式
+        </Button>
+        <Button variant="ghost" size="icon" aria-label="连接设置" @click="emit('openSettings')">
+          <Settings2Icon />
         </Button>
         <WindowControls :class="!isMac && 'ml-1'" />
       </div>
