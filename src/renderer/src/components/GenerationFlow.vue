@@ -357,7 +357,17 @@ function selectNode({ node }: NodeMouseEvent): void {
 .generation-flow .vue-flow__controls-button {
   border-color: var(--border);
   background: var(--card);
-  color: var(--foreground);
+  color: var(--foreground) !important;
+}
+
+.generation-flow .vue-flow__controls-button svg {
+  color: var(--foreground) !important;
+  stroke: currentColor;
+}
+
+.generation-flow .vue-flow__controls-button:hover {
+  background: var(--accent);
+  color: var(--accent-foreground) !important;
 }
 
 .generation-flow .vue-flow__minimap-mask {
