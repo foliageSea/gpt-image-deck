@@ -105,7 +105,7 @@ const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
 const previewOpen = ref(false)
 const historyOpen = ref(false)
-const flowOpen = ref(false)
+const flowOpen = ref(true)
 const flowGenerating = ref(false)
 const pendingDeleteJob = ref<GenerationJob | null>(null)
 const pendingReuseJob = ref<GenerationJob | null>(null)
@@ -114,7 +114,7 @@ type Feedback = { type: 'info' | 'success' | 'error'; title: string; message: st
 const generationFeedback = ref<Feedback | null>(null)
 const connectionFeedback = ref<Feedback | null>(null)
 type FlowCreation = {
-  job: GenerationJob
+  job?: GenerationJob
   variant: boolean
   prompt: string
   size: string
@@ -201,7 +201,6 @@ function resetProjectContext(): void {
   form.referenceIds = []
   form.parentJobId = undefined
   form.sourceAssetId = undefined
-  flowOpen.value = false
   flowCreation.value = null
   pendingReuseJob.value = null
 }
@@ -407,6 +406,17 @@ function openFlowCreation(job: GenerationJob, variant: boolean): void {
   }
 }
 
+function openNewFlowCreation(): void {
+  flowCreation.value = {
+    variant: false,
+    prompt: '',
+    size: form.size,
+    quality: form.quality,
+    n: form.n,
+    references: []
+  }
+}
+
 async function pickFlowReferences(): Promise<void> {
   const creation = flowCreation.value
   if (!creation) return
@@ -414,7 +424,7 @@ async function pickFlowReferences(): Promise<void> {
     const picked = await api.pickReferenceImages()
     const existingIds = new Set(creation.references.map((item) => item.id))
     const unique = picked.filter((item) => !existingIds.has(item.id))
-    creation.references = [...creation.references, ...unique].slice(0, 15)
+    creation.references = [...creation.references, ...unique].slice(0, creation.job ? 15 : 16)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '参考图片读取失败。')
   }
@@ -427,8 +437,9 @@ function removeFlowReference(id: string): void {
 
 async function generateFromFlow(): Promise<void> {
   const creation = flowCreation.value
-  const asset = creation?.job.assets[0]
-  if (!creation || !asset || !creation.prompt.trim() || flowGenerating.value) return
+  const asset = creation?.job?.assets[0]
+  if (!creation || (creation.job && !asset) || !creation.prompt.trim() || flowGenerating.value)
+    return
   if (!settings.value.hasApiKey) {
     settingsOpen.value = true
     toast.info('请先配置 API Key。')
@@ -437,20 +448,23 @@ async function generateFromFlow(): Promise<void> {
 
   flowGenerating.value = true
   try {
-    const reference = await api.useAssetAsReference(asset.id)
+    const sourceReference = asset ? await api.useAssetAsReference(asset.id) : null
     const result = await api.generate({
       projectId: projectState.value.currentProjectId,
       prompt: creation.prompt.trim(),
-      referenceIds: [reference.id, ...creation.references.map((item) => item.id)],
-      parentJobId: creation.job.id,
-      sourceAssetId: asset.id,
+      referenceIds: [
+        ...(sourceReference ? [sourceReference.id] : []),
+        ...creation.references.map((item) => item.id)
+      ],
+      parentJobId: creation.job?.id,
+      sourceAssetId: asset?.id,
       n: creation.n,
       size: creation.size,
       quality: creation.quality,
-      format: creation.job.request.format,
-      compression: creation.job.request.compression,
-      background: creation.job.request.background,
-      inputFidelity: creation.variant ? 'low' : 'high'
+      format: creation.job?.request.format ?? form.format,
+      compression: creation.job?.request.compression ?? form.compression,
+      background: creation.job?.request.background ?? form.background,
+      inputFidelity: creation.job ? (creation.variant ? 'low' : 'high') : form.inputFidelity
     })
     if (!result.success) {
       toast.error(result.message, { duration: 8000 })
@@ -621,10 +635,16 @@ onMounted(load)
   <GenerationFlow
     v-if="flowOpen"
     :history="history"
+    :projects="projectState.projects"
+    :current-project-id="projectState.currentProjectId"
     :selected-job-id="selectedJob?.id"
+    :project-busy="projectBusy || changingProject"
     @close="flowOpen = false"
     @select="selectFlowJob"
     @create="openFlowCreation"
+    @create-root="openNewFlowCreation"
+    @switch-project="switchProject"
+    @manage-projects="projectsOpen = true"
     @delete="pendingDeleteJob = $event"
   />
   <div v-else class="flex h-screen flex-col bg-background">
@@ -682,6 +702,9 @@ onMounted(load)
           @click="projectsOpen = true"
         >
           <PlusIcon />
+        </Button>
+        <Button variant="secondary" size="sm" aria-label="切换到流程创造模式" @click="openFlow">
+          <GitBranchIcon data-icon="inline-start" />流程模式
         </Button>
         <Button
           variant="ghost"
@@ -1236,13 +1259,28 @@ onMounted(load)
       :show-close-button="!flowGenerating"
     >
       <DialogHeader>
-        <DialogTitle>{{ flowCreation?.variant ? '生成节点变体' : '基于节点继续创作' }}</DialogTitle>
+        <DialogTitle>
+          {{
+            !flowCreation?.job
+              ? '新建起始节点'
+              : flowCreation.variant
+                ? '生成节点变体'
+                : '基于节点继续创作'
+          }}
+        </DialogTitle>
         <DialogDescription>
-          当前图片会作为参考，生成结果将自动连接到该节点并保留在流程画布中。
+          {{
+            flowCreation?.job
+              ? '当前图片会作为参考，生成结果将自动连接到该节点并保留在流程画布中。'
+              : '从提示词创建一组图片，并作为独立的起始节点加入当前流程。'
+          }}
         </DialogDescription>
       </DialogHeader>
       <div v-if="flowCreation" class="flex flex-col gap-5">
-        <div class="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
+        <div
+          v-if="flowCreation.job"
+          class="flex items-center gap-3 rounded-xl border bg-muted/20 p-3"
+        >
           <img
             v-if="flowCreation.job.assets[0]"
             :src="flowCreation.job.assets[0].url"
@@ -1263,11 +1301,21 @@ onMounted(load)
               id="flow-prompt"
               v-model="flowCreation.prompt"
               class="min-h-32 resize-none"
-              placeholder="描述希望基于当前节点继续生成的画面……"
+              :placeholder="
+                flowCreation.job ? '描述希望基于当前节点继续生成的画面……' : '描述希望创建的画面……'
+              "
               :disabled="flowGenerating"
             />
             <FieldDescription class="flex justify-between">
-              <span>{{ flowCreation.variant ? '灵活生成相似变体' : '高度还原来源图片' }}</span>
+              <span>
+                {{
+                  !flowCreation.job
+                    ? '创建一个新的流程起点'
+                    : flowCreation.variant
+                      ? '灵活生成相似变体'
+                      : '高度还原来源图片'
+                }}
+              </span>
               <span>{{ flowCreation.prompt.length }}/32000</span>
             </FieldDescription>
           </Field>
@@ -1275,11 +1323,14 @@ onMounted(load)
             <div class="flex items-center justify-between">
               <FieldLabel>参考图片</FieldLabel>
               <span class="text-xs text-muted-foreground">
-                {{ flowCreation.references.length + 1 }}/16
+                {{ flowCreation.references.length + (flowCreation.job ? 1 : 0) }}/16
               </span>
             </div>
             <div class="grid grid-cols-6 gap-2">
-              <div class="relative aspect-square overflow-hidden rounded-lg border bg-muted">
+              <div
+                v-if="flowCreation.job"
+                class="relative aspect-square overflow-hidden rounded-lg border bg-muted"
+              >
                 <img
                   v-if="flowCreation.job.assets[0]"
                   :src="flowCreation.job.assets[0].url"
@@ -1306,7 +1357,7 @@ onMounted(load)
                 </Button>
               </div>
               <button
-                v-if="flowCreation.references.length < 15"
+                v-if="flowCreation.references.length < (flowCreation.job ? 15 : 16)"
                 type="button"
                 class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 :disabled="flowGenerating"
@@ -1317,7 +1368,11 @@ onMounted(load)
               </button>
             </div>
             <FieldDescription>
-              来源节点固定作为第一张参考图，可继续添加 PNG、JPG 或 WebP。
+              {{
+                flowCreation.job
+                  ? '来源节点固定作为第一张参考图，可继续添加 PNG、JPG 或 WebP。'
+                  : '可添加 PNG、JPG 或 WebP 作为新节点的参考图片。'
+              }}
             </FieldDescription>
           </Field>
           <div class="grid grid-cols-3 gap-3">

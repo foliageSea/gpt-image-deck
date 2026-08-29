@@ -1,22 +1,39 @@
 <script setup lang="ts">
 import type { Edge, Node, NodeMouseEvent } from '@vue-flow/core'
-import type { GenerationJob } from '../../../shared/image-types'
+import type { GenerationJob, Project } from '../../../shared/image-types'
 import type { GenerationFlowNodeData } from './GenerationFlowNode.vue'
 import dagre from '@dagrejs/dagre'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { VueFlow } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
-import { GitBranchIcon, XIcon } from '@lucide/vue'
+import {
+  FolderIcon,
+  GitBranchIcon,
+  ImagePlusIcon,
+  LayoutDashboardIcon,
+  PlusIcon
+} from '@lucide/vue'
 import { computed } from 'vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
 import WindowControls from './WindowControls.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 
 const props = defineProps<{
   history: GenerationJob[]
+  projects: Project[]
+  currentProjectId: string
   selectedJobId?: string
+  projectBusy?: boolean
 }>()
 
 const isMac = window.imageDeck.windowControls.platform === 'darwin'
@@ -25,6 +42,9 @@ const emit = defineEmits<{
   close: []
   select: [job: GenerationJob]
   create: [job: GenerationJob, variant: boolean]
+  createRoot: []
+  switchProject: [projectId: unknown]
+  manageProjects: []
   delete: [job: GenerationJob]
 }>()
 
@@ -104,15 +124,46 @@ function selectNode({ node }: NodeMouseEvent): void {
           isMac && 'pr-3'
         ]"
       >
-        <span class="hidden text-xs text-muted-foreground sm:inline">双击节点返回作品</span>
-        <Button variant="outline" size="sm" @click="emit('close')">
-          <XIcon data-icon="inline-start" />关闭流程
+        <Select
+          :model-value="currentProjectId"
+          :disabled="projectBusy"
+          @update:model-value="emit('switchProject', $event)"
+        >
+          <SelectTrigger class="w-32 sm:w-40" aria-label="当前项目">
+            <FolderIcon />
+            <SelectValue placeholder="选择项目" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="管理项目"
+          :disabled="projectBusy"
+          @click="emit('manageProjects')"
+        >
+          <PlusIcon />
+        </Button>
+        <Button size="sm" :disabled="projectBusy" @click="emit('createRoot')">
+          <ImagePlusIcon data-icon="inline-start" />新建节点
+        </Button>
+        <span class="hidden text-xs text-muted-foreground sm:inline"
+          >双击节点可在工作台查看作品</span
+        >
+        <Button variant="secondary" size="sm" @click="emit('close')">
+          <LayoutDashboardIcon data-icon="inline-start" />工作台模式
         </Button>
         <WindowControls :class="!isMac && 'ml-1'" />
       </div>
     </header>
 
-    <div class="min-h-0 flex-1">
+    <div class="relative min-h-0 flex-1">
       <VueFlow
         :key="history.map((job) => job.id).join(':')"
         :nodes="graph.nodes"
@@ -132,6 +183,29 @@ function selectNode({ node }: NodeMouseEvent): void {
         <MiniMap pannable zoomable />
         <Controls :show-interactive="false" />
       </VueFlow>
+      <div
+        v-if="!history.length"
+        class="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
+      >
+        <div
+          class="pointer-events-auto flex max-w-sm flex-col items-center gap-4 rounded-2xl border bg-card/90 p-8 text-center shadow-2xl shadow-background/40 backdrop-blur-xl"
+        >
+          <div
+            class="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground"
+          >
+            <ImagePlusIcon />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <h3 class="text-base font-semibold">创建第一个流程节点</h3>
+            <p class="text-sm leading-6 text-muted-foreground">
+              先在工作台生成一组图片，后续即可从任意节点继续创作和探索分支。
+            </p>
+          </div>
+          <Button @click="emit('createRoot')">
+            <ImagePlusIcon data-icon="inline-start" />新建节点
+          </Button>
+        </div>
+      </div>
     </div>
   </section>
 </template>
