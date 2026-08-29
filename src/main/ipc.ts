@@ -15,7 +15,13 @@ import {
   getProjectState,
   selectProject
 } from './services/project-store'
-import { getStoredSettings, updateStoredSettings } from './services/settings-store'
+import {
+  backgroundImageUrl,
+  clearBackgroundImage,
+  getStoredSettings,
+  pickBackgroundImage,
+  updateStoredSettings
+} from './services/settings-store'
 import {
   pickReferenceImages,
   saveAsset,
@@ -99,7 +105,9 @@ export function registerIpcHandlers(): void {
   handle('settings:get', async () => {
     const settings = await getStoredSettings()
     return {
-      ...settings,
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      backgroundImageUrl: backgroundImageUrl(settings),
       hasApiKey: await hasApiKey(),
       secureStorageAvailable: isSecureStorageAvailable()
     }
@@ -108,7 +116,29 @@ export function registerIpcHandlers(): void {
   handle<[SettingsUpdate], unknown>('settings:update', async (_, settings) => {
     const updated = await updateStoredSettings(settings)
     return {
-      ...updated,
+      baseUrl: updated.baseUrl,
+      model: updated.model,
+      backgroundImageUrl: backgroundImageUrl(updated),
+      hasApiKey: await hasApiKey(),
+      secureStorageAvailable: isSecureStorageAvailable()
+    }
+  })
+  handle('settings:pick-background', async () => {
+    const settings = await pickBackgroundImage()
+    return {
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      backgroundImageUrl: backgroundImageUrl(settings),
+      hasApiKey: await hasApiKey(),
+      secureStorageAvailable: isSecureStorageAvailable()
+    }
+  })
+  handle('settings:clear-background', async () => {
+    const settings = await clearBackgroundImage()
+    return {
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      backgroundImageUrl: backgroundImageUrl(settings),
       hasApiKey: await hasApiKey(),
       secureStorageAvailable: isSecureStorageAvailable()
     }

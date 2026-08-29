@@ -4,6 +4,9 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc'
 import { readAsset, resolveAsset } from './services/asset-store'
+import { getStoredSettings } from './services/settings-store'
+import { readFile } from 'node:fs/promises'
+import { extname } from 'node:path'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -76,7 +79,23 @@ app.whenReady().then(() => {
   })
 
   protocol.handle('image-deck', async (request) => {
-    const id = new URL(request.url).pathname.slice(1)
+    const url = new URL(request.url)
+    if (url.hostname === 'background') {
+      const settings = await getStoredSettings()
+      if (!settings.backgroundImage) return new Response('Not found', { status: 404 })
+      const mimeTypes: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp'
+      }
+      const mimeType = mimeTypes[extname(settings.backgroundImage).toLowerCase()]
+      if (!mimeType) return new Response('Not found', { status: 404 })
+      return new Response(new Uint8Array(await readFile(settings.backgroundImage)), {
+        headers: { 'Content-Type': mimeType, 'Cache-Control': 'no-store' }
+      })
+    }
+    const id = url.pathname.slice(1)
     const asset = resolveAsset(id)
     if (!asset) return new Response('Not found', { status: 404 })
     return new Response(new Uint8Array(await readAsset(id)), {

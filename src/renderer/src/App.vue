@@ -88,6 +88,7 @@ const settings = ref<AppSettings>({
   hasApiKey: false,
   secureStorageAvailable: false
 })
+const backgroundImageUrl = computed(() => settings.value.backgroundImageUrl)
 const settingsForm = reactive({ baseUrl: '', model: '', apiKey: '' })
 const settingsOpen = ref(false)
 const testing = ref(false)
@@ -628,6 +629,22 @@ async function clearCredential(): Promise<void> {
   toast.success('API Key 已清除。')
 }
 
+async function pickWindowBackground(): Promise<void> {
+  try {
+    settings.value = await api.pickBackgroundImage()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '背景图片设置失败。')
+  }
+}
+
+async function clearWindowBackground(): Promise<void> {
+  try {
+    settings.value = await api.clearBackgroundImage()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '背景图片清除失败。')
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -639,6 +656,7 @@ onMounted(load)
     :current-project-id="projectState.currentProjectId"
     :selected-job-id="selectedJob?.id"
     :project-busy="projectBusy || changingProject"
+    :background-image-url="backgroundImageUrl"
     @close="flowOpen = false"
     @select="selectFlowJob"
     @create="openFlowCreation"
@@ -647,10 +665,17 @@ onMounted(load)
     @manage-projects="projectsOpen = true"
     @delete="pendingDeleteJob = $event"
   />
-  <div v-else class="flex h-screen flex-col bg-background">
+  <div
+    v-else
+    class="window-background flex h-screen flex-col bg-background"
+    :class="backgroundImageUrl && 'has-custom-background'"
+    :style="
+      backgroundImageUrl ? { '--window-background-image': `url('${backgroundImageUrl}')` } : {}
+    "
+  >
     <header
       :class="[
-        'flex h-14 shrink-0 items-center border-b bg-card/70 backdrop-blur-xl [-webkit-app-region:drag]',
+        'relative z-10 flex h-14 shrink-0 items-center border-b bg-card/70 backdrop-blur-xl [-webkit-app-region:drag]',
         isMac ? 'pl-24' : 'pl-4'
       ]"
     >
@@ -735,7 +760,7 @@ onMounted(load)
     </header>
 
     <main
-      class="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_280px] max-xl:grid-cols-[300px_minmax(0,1fr)]"
+      class="relative z-10 grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_280px] max-xl:grid-cols-[300px_minmax(0,1fr)]"
     >
       <aside class="flex min-h-0 flex-col border-r bg-card/35">
         <ScrollArea class="min-h-0 flex-1">
@@ -1477,6 +1502,23 @@ onMounted(load)
         <Field>
           <FieldLabel for="model">模型名称</FieldLabel>
           <Input id="model" v-model="settingsForm.model" placeholder="gpt-image-2" />
+        </Field>
+        <Field>
+          <FieldLabel>窗口背景</FieldLabel>
+          <div class="flex items-center gap-2">
+            <Button variant="outline" type="button" @click="pickWindowBackground">
+              <ImageIcon data-icon="inline-start" />选择图片
+            </Button>
+            <Button
+              v-if="settings.backgroundImageUrl"
+              variant="ghost"
+              type="button"
+              @click="clearWindowBackground"
+            >
+              恢复默认
+            </Button>
+          </div>
+          <FieldDescription>背景会覆盖整个窗口、自绘标题栏和流程模式。</FieldDescription>
         </Field>
       </FieldGroup>
       <Alert

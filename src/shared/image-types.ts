@@ -64,6 +64,7 @@ export interface GenerationJob {
 export interface AppSettings {
   baseUrl: string
   model: string
+  backgroundImageUrl?: string
   hasApiKey: boolean
   secureStorageAvailable: boolean
 }
@@ -111,6 +112,8 @@ export interface ImageDeckApi {
   windowControls: WindowControlsApi
   getSettings: () => Promise<AppSettings>
   updateSettings: (settings: SettingsUpdate) => Promise<AppSettings>
+  pickBackgroundImage: () => Promise<AppSettings>
+  clearBackgroundImage: () => Promise<AppSettings>
   setApiKey: (apiKey: string) => Promise<OperationResult>
   clearApiKey: () => Promise<void>
   testConnection: (input: ConnectionTestInput) => Promise<OperationResult>

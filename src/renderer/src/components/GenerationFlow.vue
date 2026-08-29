@@ -34,6 +34,7 @@ const props = defineProps<{
   currentProjectId: string
   selectedJobId?: string
   projectBusy?: boolean
+  backgroundImageUrl?: string
 }>()
 
 const isMac = window.imageDeck.windowControls.platform === 'darwin'
@@ -101,10 +102,16 @@ function selectNode({ node }: NodeMouseEvent): void {
 </script>
 
 <template>
-  <section class="flex h-screen flex-col bg-background">
+  <section
+    class="window-background flex h-screen flex-col bg-background"
+    :class="backgroundImageUrl && 'has-custom-background'"
+    :style="
+      backgroundImageUrl ? { '--window-background-image': `url('${backgroundImageUrl}')` } : {}
+    "
+  >
     <header
       :class="[
-        'flex h-14 shrink-0 items-center gap-3 border-b bg-card/80 backdrop-blur-xl [-webkit-app-region:drag]',
+        'relative z-10 flex h-14 shrink-0 items-center gap-3 border-b bg-card/80 backdrop-blur-xl [-webkit-app-region:drag]',
         isMac ? 'pl-24' : 'pl-5'
       ]"
     >
@@ -163,7 +170,7 @@ function selectNode({ node }: NodeMouseEvent): void {
       </div>
     </header>
 
-    <div class="relative min-h-0 flex-1">
+    <div class="relative z-10 min-h-0 flex-1">
       <VueFlow
         :key="history.map((job) => job.id).join(':')"
         :nodes="graph.nodes"
@@ -221,7 +228,7 @@ function selectNode({ node }: NodeMouseEvent): void {
   --vf-node-color: var(--foreground);
   --vf-handle: var(--primary);
   --vf-edge: var(--muted-foreground);
-  background: var(--background);
+  background: color-mix(in oklab, var(--background) 72%, transparent);
 }
 
 .generation-flow .vue-flow__edge-path {

@@ -19,6 +19,8 @@ const api: ImageDeckApi = {
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
+  pickBackgroundImage: () => ipcRenderer.invoke('settings:pick-background'),
+  clearBackgroundImage: () => ipcRenderer.invoke('settings:clear-background'),
   setApiKey: (apiKey) => ipcRenderer.invoke('credentials:set', apiKey),
   clearApiKey: () => ipcRenderer.invoke('credentials:clear'),
   testConnection: (input) => ipcRenderer.invoke('connection:test', input),

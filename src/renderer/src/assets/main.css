@@ -76,6 +76,22 @@
     color-scheme: dark;
   }
 
+  .window-background {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .window-background.has-custom-background::before {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    background-image:
+      linear-gradient(rgb(8 8 10 / 42%), rgb(8 8 10 / 42%)), var(--window-background-image);
+    background-position: center;
+    background-size: cover;
+    content: '';
+  }
+
   button,
   input,
   textarea {
