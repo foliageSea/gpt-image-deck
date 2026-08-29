@@ -92,6 +92,8 @@ const creatingProject = ref(false)
 const changingProject = ref(false)
 const pendingDeleteProject = ref<Project | null>(null)
 const deletingProject = ref(false)
+const exportingProject = ref(false)
+const importingProject = ref(false)
 const history = ref<GenerationJob[]>([])
 const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
@@ -141,7 +143,9 @@ const form = reactive<GenerationRequest>({
 const canGenerate = computed(
   () => Boolean(form.projectId) && form.prompt.trim().length > 0 && !generating.value
 )
-const projectBusy = computed(() => generating.value || flowGenerating.value)
+const projectBusy = computed(
+  () => generating.value || flowGenerating.value || exportingProject.value || importingProject.value
+)
 const currentProject = computed(() =>
   projectState.value.projects.find((project) => project.id === projectState.value.currentProjectId)
 )
@@ -243,6 +247,42 @@ async function createNewProject(): Promise<void> {
     toast.error(error instanceof Error ? error.message : '项目创建失败。')
   } finally {
     creatingProject.value = false
+  }
+}
+
+async function exportCurrentProject(): Promise<void> {
+  const project = currentProject.value
+  if (!project || exportingProject.value) return
+  exportingProject.value = true
+  try {
+    const result = await api.exportProject(project.id)
+    if (result.success) toast.success(result.message ?? '项目已导出。')
+    else toast.info(result.message ?? '已取消导出。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目导出失败。')
+  } finally {
+    exportingProject.value = false
+  }
+}
+
+async function importProjectArchive(): Promise<void> {
+  if (importingProject.value) return
+  importingProject.value = true
+  try {
+    const result = await api.importProject()
+    if (!result.success) {
+      toast.info(result.message)
+      return
+    }
+    await applyProjectState(result.state)
+    projectsOpen.value = false
+    toast.success(result.message, {
+      description: `已恢复 ${result.jobCount} 条历史记录和 ${result.assetCount} 张图片。`
+    })
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目导入失败。', { duration: 8000 })
+  } finally {
+    importingProject.value = false
   }
 }
 
@@ -1313,6 +1353,30 @@ onMounted(load)
               @click="confirmDeleteProject"
             >
               <Trash2Icon data-icon="inline-start" />删除项目
+            </Button>
+          </div>
+        </Field>
+        <Field>
+          <FieldLabel>迁移项目</FieldLabel>
+          <FieldDescription
+            >项目包包含生成历史、参数、关系和图片，不包含 API Key 与应用设置。</FieldDescription
+          >
+          <div class="grid grid-cols-2 gap-2">
+            <Button variant="outline" :disabled="projectBusy" @click="importProjectArchive">
+              <LoaderCircleIcon
+                v-if="importingProject"
+                data-icon="inline-start"
+                class="animate-spin"
+              />
+              <UploadCloudIcon v-else data-icon="inline-start" />导入项目
+            </Button>
+            <Button variant="outline" :disabled="projectBusy" @click="exportCurrentProject">
+              <LoaderCircleIcon
+                v-if="exportingProject"
+                data-icon="inline-start"
+                class="animate-spin"
+              />
+              <DownloadIcon v-else data-icon="inline-start" />导出项目
             </Button>
           </div>
         </Field>

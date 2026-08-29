@@ -112,6 +112,10 @@ export function restoreAssets(jobId: string, values: GeneratedAsset[]): void {
   }
 }
 
+export function storedAssetPath(jobId: string, name: string): string {
+  return join(dataPath('assets', jobId), name)
+}
+
 export async function saveAsset(id: string): Promise<boolean> {
   const asset = assets.get(id)
   if (!asset) throw new Error('图片不存在。')

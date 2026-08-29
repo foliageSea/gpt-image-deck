@@ -22,6 +22,11 @@ import {
 } from './services/project-store'
 import { createPrompt, deletePrompt, listPrompts, updatePrompt } from './services/prompt-store'
 import {
+  exportProject,
+  importProject,
+  requireProjectTransferIdle
+} from './services/project-transfer'
+import {
   backgroundImageUrl,
   clearBackgroundImage,
   getStoredSettings,
@@ -180,6 +185,7 @@ export function registerIpcHandlers(): void {
   handle<[GenerationRequest, string?], unknown>(
     'images:generate',
     async (event, request, requestId) => {
+      requireProjectTransferIdle()
       const id = requestId === undefined ? undefined : requireUuid(requestId, '生成请求')
       const controller = new AbortController()
       if (id) generationControllers.set(id, { controller, senderId: event.sender.id })
@@ -206,17 +212,24 @@ export function registerIpcHandlers(): void {
   })
   handle('projects:get', async () => getProjectState())
   handle<[string], unknown>('projects:create', async (_, name) => {
+    requireProjectTransferIdle()
     if (typeof name !== 'string') throw new Error('项目名称无效。')
     return createProject(name)
   })
-  handle<[string], unknown>('projects:select', async (_, projectId) =>
-    selectProject(requireUuid(projectId, '项目'))
-  )
+  handle<[string], unknown>('projects:select', async (_, projectId) => {
+    requireProjectTransferIdle()
+    return selectProject(requireUuid(projectId, '项目'))
+  })
   handle<[string], unknown>('projects:delete', async (_, projectId) => {
+    requireProjectTransferIdle()
     const id = requireUuid(projectId, '项目')
     await clearHistory(id)
     return deleteProject(id)
   })
+  handle<[string], unknown>('projects:export', async (_, projectId) =>
+    exportProject(requireUuid(projectId, '项目'))
+  )
+  handle('projects:import', async () => importProject())
   handle('prompts:list', async () => listPrompts())
   handle<[PromptTemplateInput], unknown>('prompts:create', async (_, input) => createPrompt(input))
   handle<[string, PromptTemplateInput], unknown>('prompts:update', async (_, promptId, input) =>
@@ -229,12 +242,15 @@ export function registerIpcHandlers(): void {
     listHistory(requireUuid(projectId, '项目'))
   )
   handle<[string], void>('history:delete', async (_, jobId) => {
+    requireProjectTransferIdle()
     await deleteHistory(requireUuid(jobId, '历史记录'))
   })
-  handle<[string], void>('history:clear', async (_, projectId) =>
-    clearHistory(requireUuid(projectId, '项目'))
-  )
+  handle<[string], void>('history:clear', async (_, projectId) => {
+    requireProjectTransferIdle()
+    await clearHistory(requireUuid(projectId, '项目'))
+  })
   handle<[string, boolean], unknown>('history:set-asset-favorite', async (_, assetId, favorite) => {
+    requireProjectTransferIdle()
     if (typeof favorite !== 'boolean') throw new Error('收藏状态无效。')
     return setAssetFavorite(requireUuid(assetId, '图片'), favorite)
   })

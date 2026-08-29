@@ -37,6 +37,24 @@ export async function addHistory(job: GenerationJob): Promise<void> {
   await Promise.allSettled(removed.map((value) => deleteJobAssets(value.id)))
 }
 
+export async function addImportedHistory(jobs: GenerationJob[]): Promise<void> {
+  const values = await history()
+  const existingJobIds = new Set(values.map((job) => job.id))
+  const existingAssetIds = new Set(values.flatMap((job) => job.assets.map((asset) => asset.id)))
+  if (
+    jobs.some(
+      (job) =>
+        existingJobIds.has(job.id) || job.assets.some((asset) => existingAssetIds.has(asset.id))
+    )
+  ) {
+    throw new Error('导入项目的历史记录 ID 与现有数据冲突。')
+  }
+  const next = [...jobs, ...values]
+  await writeJson(historyPath(), next)
+  cache = next
+  for (const job of jobs) restoreAssets(job.id, job.assets)
+}
+
 export async function deleteHistory(jobId: string): Promise<void> {
   const values = await history()
   if (!values.some((job) => job.id === jobId)) throw new Error('历史记录不存在。')

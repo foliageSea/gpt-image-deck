@@ -94,6 +94,17 @@ export interface ProjectState {
   currentProjectId: string
 }
 
+export type ProjectImportResult =
+  | {
+      success: true
+      message: string
+      state: ProjectState
+      project: Project
+      jobCount: number
+      assetCount: number
+    }
+  | { success: false; message: string }
+
 export interface PromptTemplate {
   id: string
   title: string
@@ -138,6 +149,8 @@ export interface ImageDeckApi {
   createProject: (name: string) => Promise<ProjectState>
   selectProject: (projectId: string) => Promise<ProjectState>
   deleteProject: (projectId: string) => Promise<ProjectState>
+  exportProject: (projectId: string) => Promise<OperationResult>
+  importProject: () => Promise<ProjectImportResult>
   listPrompts: () => Promise<PromptTemplate[]>
   createPrompt: (input: PromptTemplateInput) => Promise<PromptTemplate[]>
   updatePrompt: (id: string, input: PromptTemplateInput) => Promise<PromptTemplate[]>
