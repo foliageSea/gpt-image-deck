@@ -44,6 +44,9 @@ importers:
       openai:
         specifier: ^7.8.0
         version: 7.8.0(undici@6.28.0)
+      photoswipe:
+        specifier: ^5.4.4
+        version: 5.4.4
       reka-ui:
         specifier: ^2.10.4
         version: 2.10.4(vue@3.5.42(typescript@5.9.3))
@@ -2269,6 +2272,10 @@ packages:
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
+
+  photoswipe@5.4.4:
+    resolution: {integrity: sha512-WNFHoKrkZNnvFFhbHL93WDkW3ifwVOXSW3w1UuZZelSmgXpIGiZSNlZJq37rR8YejqME2rHs9EhH9ZvlvFH2NA==}
+    engines: {node: '>= 0.12.0'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -4913,6 +4920,8 @@ snapshots:
   pe-library@0.4.1: {}
 
   pend@1.2.0: {}
+
+  photoswipe@5.4.4: {}
 
   picocolors@1.1.1: {}
 

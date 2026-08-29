@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'photoswipe/style.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -96,5 +97,28 @@
   input,
   textarea {
     user-select: auto;
+  }
+}
+
+.pswp {
+  --pswp-bg: #09090b;
+  --pswp-icon-color: #fff;
+  --pswp-icon-color-secondary: #18181b;
+  --pswp-icon-stroke-width: 1.5px;
+}
+
+.pswp__top-bar {
+  background: linear-gradient(to bottom, rgb(0 0 0 / 65%), transparent);
+}
+
+@media (max-width: 720px) {
+  .image-preview-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .image-preview-actions > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -37,6 +37,7 @@ import {
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import HistoryPanel from '@/components/HistoryPanel.vue'
+import ImagePreview from '@/components/ImagePreview.vue'
 import GenerationFlow from '@/components/GenerationFlow.vue'
 import PromptLibraryDialog from '@/components/PromptLibraryDialog.vue'
 import WindowControls from '@/components/WindowControls.vue'
@@ -653,6 +654,10 @@ async function saveAsset(asset: GeneratedAsset): Promise<void> {
 function openPreview(asset: GeneratedAsset): void {
   selectedAsset.value = asset
   previewOpen.value = true
+}
+
+function selectPreviewAsset(asset: GeneratedAsset): void {
+  selectedAsset.value = asset
 }
 
 async function saveSettings(): Promise<void> {
@@ -1584,38 +1589,17 @@ onMounted(load)
     </DialogContent>
   </Dialog>
 
-  <Dialog v-model:open="previewOpen">
-    <DialogContent
-      class="flex h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-none items-center justify-center border-none bg-transparent p-0 shadow-none sm:max-w-none"
-      :close-on-overlay-click="true"
-      @close="previewOpen = false"
-      @click.self="previewOpen = false"
-    >
-      <DialogHeader class="sr-only"><DialogTitle>图片预览</DialogTitle></DialogHeader>
-      <img
-        v-if="selectedAsset"
-        :src="selectedAsset.url"
-        :alt="selectedAsset.name"
-        class="h-auto max-h-full w-auto max-w-full object-contain"
-        draggable="false"
-      />
-      <div v-if="selectedAsset" class="absolute bottom-4 right-4 flex flex-wrap justify-end gap-2">
-        <Button variant="secondary" @click="toggleFavorite(selectedAsset)">
-          <HeartIcon data-icon="inline-start" :class="selectedAsset.favorite && 'fill-current'" />
-          {{ selectedAsset.favorite ? '已收藏' : '收藏' }}
-        </Button>
-        <Button variant="secondary" @click="continueWithAsset(selectedAsset, true)">
-          <SparklesIcon data-icon="inline-start" />生成变体
-        </Button>
-        <Button @click="continueWithAsset(selectedAsset)">
-          <GitBranchIcon data-icon="inline-start" />继续创作
-        </Button>
-        <Button @click="saveAsset(selectedAsset)">
-          <DownloadIcon data-icon="inline-start" />保存图片
-        </Button>
-      </div>
-    </DialogContent>
-  </Dialog>
+  <ImagePreview
+    v-model:open="previewOpen"
+    :assets="currentAssets"
+    :asset-id="selectedAsset?.id"
+    :image-size="selectedJob?.request.size"
+    @select="selectPreviewAsset"
+    @favorite="toggleFavorite"
+    @variant="continueWithAsset($event, true)"
+    @continue="continueWithAsset"
+    @save="saveAsset"
+  />
 
   <Toaster position="top-right" rich-colors />
 </template>
