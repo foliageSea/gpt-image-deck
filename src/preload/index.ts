@@ -30,6 +30,7 @@ const api: ImageDeckApi = {
   cancelGeneration: (requestId) => ipcRenderer.invoke('images:cancel', requestId),
   getProjects: () => ipcRenderer.invoke('projects:get'),
   createProject: (name) => ipcRenderer.invoke('projects:create', name),
+  renameProject: (projectId, name) => ipcRenderer.invoke('projects:rename', projectId, name),
   selectProject: (projectId) => ipcRenderer.invoke('projects:select', projectId),
   deleteProject: (projectId) => ipcRenderer.invoke('projects:delete', projectId),
   exportProject: (projectId) => ipcRenderer.invoke('projects:export', projectId),

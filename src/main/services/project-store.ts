@@ -55,6 +55,28 @@ export async function createProject(name: string): Promise<ProjectState> {
   return getProjectState()
 }
 
+export async function renameProject(projectId: string, name: string): Promise<ProjectState> {
+  const value = await state()
+  const normalized = normalizeName(name)
+  if (!value.projects.some((item) => item.id === projectId)) throw new Error('项目不存在。')
+  if (
+    value.projects.some(
+      (item) =>
+        item.id !== projectId && item.name.toLocaleLowerCase() === normalized.toLocaleLowerCase()
+    )
+  ) {
+    throw new Error('已存在同名项目。')
+  }
+  cache = {
+    ...value,
+    projects: value.projects.map((item) =>
+      item.id === projectId ? { ...item, name: normalized } : item
+    )
+  }
+  await writeJson(projectsPath(), cache)
+  return getProjectState()
+}
+
 export async function addImportedProject(project: Project): Promise<ProjectState> {
   const value = await state()
   const normalized = normalizeName(project.name)

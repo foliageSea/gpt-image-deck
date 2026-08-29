@@ -18,6 +18,7 @@ import {
   createProject,
   deleteProject,
   getProjectState,
+  renameProject,
   selectProject
 } from './services/project-store'
 import { createPrompt, deletePrompt, listPrompts, updatePrompt } from './services/prompt-store'
@@ -215,6 +216,12 @@ export function registerIpcHandlers(): void {
     requireProjectTransferIdle()
     if (typeof name !== 'string') throw new Error('项目名称无效。')
     return createProject(name)
+  })
+  handle<[string, string], unknown>('projects:rename', async (_, projectId, name) => {
+    requireProjectTransferIdle()
+    const id = requireUuid(projectId, '项目')
+    if (typeof name !== 'string') throw new Error('项目名称无效。')
+    return renameProject(id, name)
   })
   handle<[string], unknown>('projects:select', async (_, projectId) => {
     requireProjectTransferIdle()

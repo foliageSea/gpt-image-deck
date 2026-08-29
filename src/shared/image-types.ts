@@ -147,6 +147,7 @@ export interface ImageDeckApi {
   cancelGeneration: (requestId: string) => Promise<void>
   getProjects: () => Promise<ProjectState>
   createProject: (name: string) => Promise<ProjectState>
+  renameProject: (projectId: string, name: string) => Promise<ProjectState>
   selectProject: (projectId: string) => Promise<ProjectState>
   deleteProject: (projectId: string) => Promise<ProjectState>
   exportProject: (projectId: string) => Promise<OperationResult>

@@ -88,7 +88,10 @@ const references = ref<ReferenceImage[]>([])
 const projectState = ref<ProjectState>({ projects: [], currentProjectId: '' })
 const projectsOpen = ref(false)
 const projectName = ref('')
+const editingProjectName = ref('')
+const projectNameEditing = ref(false)
 const creatingProject = ref(false)
+const renamingProject = ref(false)
 const changingProject = ref(false)
 const pendingDeleteProject = ref<Project | null>(null)
 const deletingProject = ref(false)
@@ -168,6 +171,10 @@ watch(
   }
 )
 
+watch(projectsOpen, (open) => {
+  if (!open) cancelProjectNameEditing()
+})
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric',
@@ -195,6 +202,9 @@ async function load(): Promise<void> {
     prompts.value = nextPrompts
     projectState.value = nextProjects
     form.projectId = nextProjects.currentProjectId
+    editingProjectName.value =
+      nextProjects.projects.find((project) => project.id === nextProjects.currentProjectId)?.name ??
+      ''
     history.value = nextHistory
     settingsForm.baseUrl = nextSettings.baseUrl
     settingsForm.model = nextSettings.model
@@ -218,6 +228,9 @@ function resetProjectContext(): void {
 async function applyProjectState(next: ProjectState): Promise<void> {
   projectState.value = next
   form.projectId = next.currentProjectId
+  editingProjectName.value =
+    next.projects.find((project) => project.id === next.currentProjectId)?.name ?? ''
+  projectNameEditing.value = false
   resetProjectContext()
   history.value = await api.listHistory(next.currentProjectId)
   selectJob(history.value[0] ?? null)
@@ -248,6 +261,33 @@ async function createNewProject(): Promise<void> {
   } finally {
     creatingProject.value = false
   }
+}
+
+async function renameCurrentProject(): Promise<void> {
+  const project = currentProject.value
+  if (!project || !editingProjectName.value.trim() || renamingProject.value) return
+  renamingProject.value = true
+  try {
+    projectState.value = await api.renameProject(project.id, editingProjectName.value)
+    editingProjectName.value =
+      projectState.value.projects.find((item) => item.id === project.id)?.name ?? ''
+    projectNameEditing.value = false
+    toast.success('项目名称已更新。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '项目名称更新失败。')
+  } finally {
+    renamingProject.value = false
+  }
+}
+
+function editCurrentProjectName(): void {
+  editingProjectName.value = currentProject.value?.name ?? ''
+  projectNameEditing.value = true
+}
+
+function cancelProjectNameEditing(): void {
+  editingProjectName.value = currentProject.value?.name ?? ''
+  projectNameEditing.value = false
 }
 
 async function exportCurrentProject(): Promise<void> {
@@ -1341,26 +1381,52 @@ onMounted(load)
         </Field>
         <Field>
           <FieldLabel>当前项目</FieldLabel>
-          <div class="flex items-center justify-between gap-3 rounded-xl border p-3">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium">{{ currentProject?.name }}</p>
-              <p class="text-xs text-muted-foreground">{{ history.length }} 条历史记录</p>
+          <div class="rounded-xl border p-3">
+            <div class="flex items-center gap-2">
+              <div class="min-w-0 flex-1">
+                <Input
+                  v-if="projectNameEditing"
+                  v-model="editingProjectName"
+                  class="h-7 text-sm font-medium"
+                  maxlength="50"
+                  aria-label="项目名称"
+                  autofocus
+                  @keydown.enter="renameCurrentProject"
+                  @keydown.esc="cancelProjectNameEditing"
+                />
+                <button
+                  v-else
+                  type="button"
+                  class="block max-w-full truncate rounded px-1 text-left text-sm font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  aria-label="编辑项目名称"
+                  @click="editCurrentProjectName"
+                >
+                  {{ currentProject?.name }}
+                </button>
+              </div>
+              <Button
+                v-if="projectNameEditing"
+                size="sm"
+                :disabled="!editingProjectName.trim() || renamingProject || projectBusy"
+                @click="renameCurrentProject"
+              >
+                <LoaderCircleIcon v-if="renamingProject" class="animate-spin" />
+                保存
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                :disabled="projectState.projects.length === 1"
+                @click="confirmDeleteProject"
+              >
+                <Trash2Icon data-icon="inline-start" />删除项目
+              </Button>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              :disabled="projectState.projects.length === 1"
-              @click="confirmDeleteProject"
-            >
-              <Trash2Icon data-icon="inline-start" />删除项目
-            </Button>
+            <p class="mt-1 text-xs text-muted-foreground">{{ history.length }} 条历史记录</p>
           </div>
         </Field>
         <Field>
           <FieldLabel>迁移项目</FieldLabel>
-          <FieldDescription
-            >项目包包含生成历史、参数、关系和图片，不包含 API Key 与应用设置。</FieldDescription
-          >
           <div class="grid grid-cols-2 gap-2">
             <Button variant="outline" :disabled="projectBusy" @click="importProjectArchive">
               <LoaderCircleIcon
