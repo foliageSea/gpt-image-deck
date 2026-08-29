@@ -132,7 +132,8 @@ export interface ImageDeckApi {
   testConnection: (input: ConnectionTestInput) => Promise<OperationResult>
   pickReferenceImages: () => Promise<ReferenceImage[]>
   useAssetAsReference: (assetId: string) => Promise<ReferenceImage>
-  generate: (request: GenerationRequest) => Promise<GenerationResult>
+  generate: (request: GenerationRequest, requestId?: string) => Promise<GenerationResult>
+  cancelGeneration: (requestId: string) => Promise<void>
   getProjects: () => Promise<ProjectState>
   createProject: (name: string) => Promise<ProjectState>
   selectProject: (projectId: string) => Promise<ProjectState>

@@ -2,6 +2,7 @@
 import type { Edge, Node, NodeMouseEvent } from '@vue-flow/core'
 import type { GenerationJob, Project } from '../../../shared/image-types'
 import type { GenerationFlowNodeData } from './GenerationFlowNode.vue'
+import type { GenerationFlowLoadingNodeData } from './GenerationFlowLoadingNode.vue'
 import dagre from '@dagrejs/dagre'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -16,6 +17,7 @@ import {
 } from '@lucide/vue'
 import { computed } from 'vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
+import GenerationFlowLoadingNode from './GenerationFlowLoadingNode.vue'
 import WindowControls from './WindowControls.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +37,12 @@ const props = defineProps<{
   selectedJobId?: string
   projectBusy?: boolean
   backgroundImageUrl?: string
+  pendingGeneration?: {
+    id: string
+    parentJobId?: string
+    prompt: string
+    cancelling: boolean
+  }
 }>()
 
 const isMac = window.imageDeck.windowControls.platform === 'darwin'
@@ -42,11 +50,13 @@ const isMac = window.imageDeck.windowControls.platform === 'darwin'
 const emit = defineEmits<{
   close: []
   select: [job: GenerationJob]
+  preview: [job: GenerationJob]
   create: [job: GenerationJob, variant: boolean]
   createRoot: []
   switchProject: [projectId: unknown]
   manageProjects: []
   delete: [job: GenerationJob]
+  cancelGeneration: []
 }>()
 
 const graph = computed(() => {
@@ -54,31 +64,51 @@ const graph = computed(() => {
   layout.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 48, marginx: 60, marginy: 60 })
 
   for (const job of props.history) layout.setNode(job.id, { width: 288, height: 150 })
+  if (props.pendingGeneration) {
+    layout.setNode(props.pendingGeneration.id, { width: 288, height: 150 })
+  }
   for (const job of props.history) {
     if (job.parentJobId && layout.hasNode(job.parentJobId)) {
       layout.setEdge(job.parentJobId, job.id)
     }
   }
+  if (props.pendingGeneration?.parentJobId && layout.hasNode(props.pendingGeneration.parentJobId)) {
+    layout.setEdge(props.pendingGeneration.parentJobId, props.pendingGeneration.id)
+  }
   dagre.layout(layout)
 
-  const nodes: Node<GenerationFlowNodeData>[] = props.history.map((job) => {
-    const point = layout.node(job.id)
-    return {
-      id: job.id,
-      type: 'generation',
-      position: { x: point.x - 144, y: point.y - 75 },
-      selected: job.id === props.selectedJobId,
-      data: {
-        job,
-        onSelect: (value) => {
-          emit('select', value)
-          emit('close')
-        },
-        onContinue: (value, variant) => emit('create', value, variant),
-        onDelete: (value) => emit('delete', value)
+  const nodes: Node<GenerationFlowNodeData | GenerationFlowLoadingNodeData>[] = props.history.map(
+    (job) => {
+      const point = layout.node(job.id)
+      return {
+        id: job.id,
+        type: 'generation',
+        position: { x: point.x - 144, y: point.y - 75 },
+        selected: job.id === props.selectedJobId,
+        data: {
+          job,
+          onSelect: (value) => emit('preview', value),
+          onContinue: (value, variant) => emit('create', value, variant),
+          onDelete: (value) => emit('delete', value)
+        }
       }
     }
-  })
+  )
+  if (props.pendingGeneration) {
+    const point = layout.node(props.pendingGeneration.id)
+    nodes.push({
+      id: props.pendingGeneration.id,
+      type: 'generation-loading',
+      position: { x: point.x - 144, y: point.y - 75 },
+      selectable: false,
+      data: {
+        prompt: props.pendingGeneration.prompt,
+        hasParent: Boolean(props.pendingGeneration.parentJobId),
+        cancelling: props.pendingGeneration.cancelling,
+        onCancel: () => emit('cancelGeneration')
+      }
+    })
+  }
   const edges: Edge[] = props.history.flatMap((job) =>
     job.parentJobId && layout.hasNode(job.parentJobId)
       ? [
@@ -92,6 +122,15 @@ const graph = computed(() => {
         ]
       : []
   )
+  if (props.pendingGeneration?.parentJobId && layout.hasNode(props.pendingGeneration.parentJobId)) {
+    edges.push({
+      id: `${props.pendingGeneration.parentJobId}-${props.pendingGeneration.id}`,
+      source: props.pendingGeneration.parentJobId,
+      target: props.pendingGeneration.id,
+      type: 'smoothstep',
+      animated: true
+    })
+  }
   return { nodes, edges }
 })
 
@@ -124,7 +163,9 @@ function selectNode({ node }: NodeMouseEvent): void {
         <h2 class="text-sm font-semibold">创作流程</h2>
         <p class="text-xs text-muted-foreground">拖动画布探索分支，选择任意节点继续生成</p>
       </div>
-      <Badge variant="outline" class="ml-2">{{ history.length }} 个节点</Badge>
+      <Badge variant="outline" class="ml-2">
+        {{ history.length + (pendingGeneration ? 1 : 0) }} 个节点
+      </Badge>
       <div
         :class="[
           'ml-auto flex h-full items-center gap-2 [-webkit-app-region:no-drag]',
@@ -172,7 +213,7 @@ function selectNode({ node }: NodeMouseEvent): void {
 
     <div class="relative z-10 min-h-0 flex-1">
       <VueFlow
-        :key="history.map((job) => job.id).join(':')"
+        :key="`${history.map((job) => job.id).join(':')}:${pendingGeneration?.id ?? ''}`"
         :nodes="graph.nodes"
         :edges="graph.edges"
         :min-zoom="0.15"
@@ -186,12 +227,15 @@ function selectNode({ node }: NodeMouseEvent): void {
         <template #node-generation="{ data, selected }">
           <GenerationFlowNode :data="data" :selected="selected" />
         </template>
+        <template #node-generation-loading="{ data }">
+          <GenerationFlowLoadingNode :data="data" />
+        </template>
         <Background :gap="24" :size="1.25" pattern-color="var(--border)" />
         <MiniMap pannable zoomable />
         <Controls :show-interactive="false" />
       </VueFlow>
       <div
-        v-if="!history.length"
+        v-if="!history.length && !pendingGeneration"
         class="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
       >
         <div

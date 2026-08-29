@@ -102,7 +102,10 @@ export async function testConnection(input: ConnectionTestInput): Promise<void> 
   }
 }
 
-export async function generateImage(request: GenerationRequest): Promise<GenerationJob> {
+export async function generateImage(
+  request: GenerationRequest,
+  signal?: AbortSignal
+): Promise<GenerationJob> {
   validate(request)
   const apiKey = await getApiKey()
   if (!apiKey) throw new Error('请先设置 API Key。')
@@ -130,22 +133,30 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
           toFile(createReadStream(reference.path), reference.name, { type: reference.mimeType })
         )
       )
-      response = await client.images.edit({
-        ...common,
-        image: files,
-        input_fidelity: request.inputFidelity
-      })
+      response = await client.images.edit(
+        {
+          ...common,
+          image: files,
+          input_fidelity: request.inputFidelity
+        },
+        { signal }
+      )
     } else {
-      response = await client.images.generate(common)
+      response = await client.images.generate(common, { signal })
     }
 
     const results = response.data ?? []
     if (!results.length) throw new Error('接口没有返回图片数据。')
     const assetResults = await Promise.allSettled(
       results.map(async (item, index) => {
+        signal?.throwIfAborted()
         if (item.b64_json) return persistGeneratedAsset(id, item.b64_json, request.format, index)
         if (item.url) {
-          const download = await fetch(item.url, { signal: AbortSignal.timeout(60_000) })
+          const download = await fetch(item.url, {
+            signal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+              : AbortSignal.timeout(60_000)
+          })
           if (!download.ok) throw new Error(`图片下载失败（HTTP ${download.status}）。`)
           return persistGeneratedBytes(
             id,
@@ -157,6 +168,7 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
         throw new Error('接口返回结果中没有 b64_json 或 url。')
       })
     )
+    signal?.throwIfAborted()
     const assets = assetResults.flatMap((result) =>
       result.status === 'fulfilled' ? [result.value] : []
     )
@@ -187,6 +199,7 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
       usage
     }
     try {
+      signal?.throwIfAborted()
       await addHistory(job)
     } catch (error) {
       await deleteJobAssets(id)
@@ -194,6 +207,7 @@ export async function generateImage(request: GenerationRequest): Promise<Generat
     }
     return job
   } catch (error) {
+    if (signal?.aborted) await deleteJobAssets(id)
     throw new Error(mapError(error))
   }
 }

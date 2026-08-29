@@ -36,6 +36,8 @@ import {
   useAssetAsReference
 } from './services/asset-store'
 
+const generationControllers = new Map<string, { controller: AbortController; senderId: number }>()
+
 function validateSender(event: IpcMainInvokeEvent): void {
   const url = event.senderFrame?.url
   if (!url) throw new Error('无法验证应用请求来源。')
@@ -174,19 +176,32 @@ export function registerIpcHandlers(): void {
   handle<[string], unknown>('references:from-asset', async (_, assetId) =>
     useAssetAsReference(requireUuid(assetId, '图片'))
   )
-  handle<[GenerationRequest], unknown>('images:generate', async (event, request) => {
-    try {
-      const projectId = requireUuid(request.projectId, '项目')
-      const projects = await getProjectState()
-      if (!projects.projects.some((project) => project.id === projectId)) {
-        throw new Error('项目不存在。')
+  handle<[GenerationRequest, string?], unknown>(
+    'images:generate',
+    async (event, request, requestId) => {
+      const id = requestId === undefined ? undefined : requireUuid(requestId, '生成请求')
+      const controller = new AbortController()
+      if (id) generationControllers.set(id, { controller, senderId: event.sender.id })
+      try {
+        const projectId = requireUuid(request.projectId, '项目')
+        const projects = await getProjectState()
+        if (!projects.projects.some((project) => project.id === projectId)) {
+          throw new Error('项目不存在。')
+        }
+        const job = await generateImage(request, controller.signal)
+        notifyGenerationComplete(event, job.assets.length)
+        return { success: true, job }
+      } catch (error) {
+        return { success: false, message: getImageErrorMessage(error) }
+      } finally {
+        if (id) generationControllers.delete(id)
       }
-      const job = await generateImage(request)
-      notifyGenerationComplete(event, job.assets.length)
-      return { success: true, job }
-    } catch (error) {
-      return { success: false, message: getImageErrorMessage(error) }
     }
+  )
+  handle<[string], void>('images:cancel', async (event, requestId) => {
+    const id = requireUuid(requestId, '生成请求')
+    const generation = generationControllers.get(id)
+    if (generation?.senderId === event.sender.id) generation.controller.abort()
   })
   handle('projects:get', async () => getProjectState())
   handle<[string], unknown>('projects:create', async (_, name) => {

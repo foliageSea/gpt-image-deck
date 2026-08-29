@@ -112,6 +112,12 @@ const previewOpen = ref(false)
 const historyOpen = ref(false)
 const flowOpen = ref(true)
 const flowGenerating = ref(false)
+const pendingFlowGeneration = ref<{
+  id: string
+  parentJobId?: string
+  prompt: string
+  cancelling: boolean
+} | null>(null)
 const prompts = ref<PromptTemplate[]>([])
 const promptsOpen = ref(false)
 const promptTarget = ref<'main' | 'flow'>('main')
@@ -407,6 +413,12 @@ function selectFlowJob(job: GenerationJob): void {
   selectJob(job)
 }
 
+function previewFlowJob(job: GenerationJob): void {
+  selectJob(job)
+  const asset = job.assets[0]
+  if (asset) openPreview(asset)
+}
+
 function openFlowCreation(job: GenerationJob, variant: boolean): void {
   flowCreation.value = {
     job,
@@ -459,26 +471,42 @@ async function generateFromFlow(): Promise<void> {
     return
   }
 
+  const requestId = crypto.randomUUID()
+  const prompt = creation.prompt.trim()
+  pendingFlowGeneration.value = {
+    id: requestId,
+    parentJobId: creation.job?.id,
+    prompt,
+    cancelling: false
+  }
+  flowCreation.value = null
   flowGenerating.value = true
   try {
     const sourceReference = asset ? await api.useAssetAsReference(asset.id) : null
-    const result = await api.generate({
-      projectId: projectState.value.currentProjectId,
-      prompt: creation.prompt.trim(),
-      referenceIds: [
-        ...(sourceReference ? [sourceReference.id] : []),
-        ...creation.references.map((item) => item.id)
-      ],
-      parentJobId: creation.job?.id,
-      sourceAssetId: asset?.id,
-      n: creation.n,
-      size: creation.size,
-      quality: creation.quality,
-      format: creation.job?.request.format ?? form.format,
-      compression: creation.job?.request.compression ?? form.compression,
-      background: creation.job?.request.background ?? form.background,
-      inputFidelity: creation.job ? (creation.variant ? 'low' : 'high') : form.inputFidelity
-    })
+    if (pendingFlowGeneration.value?.id !== requestId || pendingFlowGeneration.value.cancelling)
+      return
+    const result = await api.generate(
+      {
+        projectId: projectState.value.currentProjectId,
+        prompt,
+        referenceIds: [
+          ...(sourceReference ? [sourceReference.id] : []),
+          ...creation.references.map((item) => item.id)
+        ],
+        parentJobId: creation.job?.id,
+        sourceAssetId: asset?.id,
+        n: creation.n,
+        size: creation.size,
+        quality: creation.quality,
+        format: creation.job?.request.format ?? form.format,
+        compression: creation.job?.request.compression ?? form.compression,
+        background: creation.job?.request.background ?? form.background,
+        inputFidelity: creation.job ? (creation.variant ? 'low' : 'high') : form.inputFidelity
+      },
+      requestId
+    )
+    if (pendingFlowGeneration.value?.id !== requestId || pendingFlowGeneration.value.cancelling)
+      return
     if (!result.success) {
       toast.error(result.message, { duration: 8000 })
       return
@@ -487,12 +515,27 @@ async function generateFromFlow(): Promise<void> {
       history.value.unshift(result.job)
       selectJob(result.job)
     }
-    flowCreation.value = null
     toast.success(creation.variant ? '变体已加入创作流程。' : '新节点已加入创作流程。')
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '流程节点生成失败。', { duration: 8000 })
+    if (!pendingFlowGeneration.value?.cancelling) {
+      toast.error(error instanceof Error ? error.message : '流程节点生成失败。', { duration: 8000 })
+    }
   } finally {
+    if (pendingFlowGeneration.value?.id === requestId) pendingFlowGeneration.value = null
     flowGenerating.value = false
+  }
+}
+
+async function cancelFlowGeneration(): Promise<void> {
+  const generation = pendingFlowGeneration.value
+  if (!generation || generation.cancelling) return
+  generation.cancelling = true
+  try {
+    await api.cancelGeneration(generation.id)
+    toast.info('正在中断节点生成。')
+  } catch (error) {
+    generation.cancelling = false
+    toast.error(error instanceof Error ? error.message : '无法中断节点生成。')
   }
 }
 
@@ -709,13 +752,16 @@ onMounted(load)
     :selected-job-id="selectedJob?.id"
     :project-busy="projectBusy || changingProject"
     :background-image-url="backgroundImageUrl"
+    :pending-generation="pendingFlowGeneration ?? undefined"
     @close="flowOpen = false"
     @select="selectFlowJob"
+    @preview="previewFlowJob"
     @create="openFlowCreation"
     @create-root="openNewFlowCreation"
     @switch-project="switchProject"
     @manage-projects="projectsOpen = true"
     @delete="pendingDeleteJob = $event"
+    @cancel-generation="cancelFlowGeneration"
   />
   <div
     v-else
