@@ -43,6 +43,7 @@ const api: ImageDeckApi = {
     ipcRenderer.invoke('history:set-asset-favorite', assetId, favorite),
   saveAsset: (assetId) => ipcRenderer.invoke('asset:save', assetId),
   saveAssets: (assetIds) => ipcRenderer.invoke('asset:save-many', assetIds),
+  copyAsset: (assetId) => ipcRenderer.invoke('asset:copy', assetId),
   showAsset: (assetId) => ipcRenderer.invoke('asset:show', assetId)
 }
 

@@ -651,6 +651,15 @@ async function saveAsset(asset: GeneratedAsset): Promise<void> {
   }
 }
 
+async function copyAsset(asset: GeneratedAsset): Promise<void> {
+  try {
+    const result = await api.copyAsset(asset.id)
+    if (result.success) toast.success(result.message ?? '图片已复制到剪贴板。')
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '复制图片失败。')
+  }
+}
+
 function openPreview(asset: GeneratedAsset): void {
   selectedAsset.value = asset
   previewOpen.value = true
@@ -1598,6 +1607,7 @@ onMounted(load)
     @favorite="toggleFavorite"
     @variant="continueWithAsset($event, true)"
     @continue="continueWithAsset"
+    @copy="copyAsset"
     @save="saveAsset"
   />
 

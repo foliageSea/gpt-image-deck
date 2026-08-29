@@ -1,5 +1,5 @@
 import type { GeneratedAsset, ReferenceImage } from '../../shared/image-types'
-import { app, dialog, shell } from 'electron'
+import { app, clipboard, dialog, nativeImage, shell } from 'electron'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -150,6 +150,14 @@ export async function saveAssets(ids: string[]): Promise<number> {
     })
   )
   return selected.length
+}
+
+export function copyAsset(id: string): void {
+  const asset = assets.get(id)
+  if (!asset) throw new Error('图片不存在。')
+  const image = nativeImage.createFromPath(asset.path)
+  if (image.isEmpty()) throw new Error('图片格式无法复制到剪贴板。')
+  clipboard.writeImage(image)
 }
 
 export async function showAsset(id: string): Promise<void> {

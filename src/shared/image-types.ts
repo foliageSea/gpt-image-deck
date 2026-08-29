@@ -148,5 +148,6 @@ export interface ImageDeckApi {
   setAssetFavorite: (assetId: string, favorite: boolean) => Promise<GenerationJob>
   saveAsset: (assetId: string) => Promise<OperationResult>
   saveAssets: (assetIds: string[]) => Promise<OperationResult>
+  copyAsset: (assetId: string) => Promise<OperationResult>
   showAsset: (assetId: string) => Promise<void>
 }

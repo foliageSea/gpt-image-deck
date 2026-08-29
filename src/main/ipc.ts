@@ -29,6 +29,7 @@ import {
   updateStoredSettings
 } from './services/settings-store'
 import {
+  copyAsset,
   pickReferenceImages,
   saveAsset,
   saveAssets,
@@ -248,6 +249,10 @@ export function registerIpcHandlers(): void {
       success: count > 0,
       message: count > 0 ? `已导出 ${count} 张图片。` : '已取消导出。'
     }
+  })
+  handle<[string], unknown>('asset:copy', async (_, assetId) => {
+    copyAsset(requireUuid(assetId, '图片'))
+    return { success: true, message: '图片已复制到剪贴板。' }
   })
   handle<[string], void>('asset:show', async (_, assetId) =>
     showAsset(requireUuid(assetId, '图片'))

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GeneratedAsset } from '../../../shared/image-types'
-import { DownloadIcon, GitBranchIcon, HeartIcon, SparklesIcon } from '@lucide/vue'
+import { CopyIcon, DownloadIcon, GitBranchIcon, HeartIcon, SparklesIcon } from '@lucide/vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ const emit = defineEmits<{
   favorite: [asset: GeneratedAsset]
   variant: [asset: GeneratedAsset]
   continue: [asset: GeneratedAsset]
+  copy: [asset: GeneratedAsset]
   save: [asset: GeneratedAsset]
 }>()
 
@@ -33,24 +34,37 @@ function getDimensions(): { width: number; height: number } {
     : { width: 1024, height: 1024 }
 }
 
-function openPreview(): void {
+function loadDimensions(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    image.onerror = reject
+    image.src = src
+  })
+}
+
+async function openPreview(): Promise<void> {
   if (!lightbox || !props.assets.length || lightbox.pswp) return
   const index = Math.max(
     0,
     props.assets.findIndex((asset) => asset.id === props.assetId)
   )
-  const dimensions = getDimensions()
-  activeAssetId.value = props.assets[index].id
-  lightbox.loadAndOpen(
-    index,
-    props.assets.map((asset) => ({
-      src: asset.url,
-      width: dimensions.width,
-      height: dimensions.height,
-      alt: asset.name,
-      assetId: asset.id
-    }))
+  const fallbackDimensions = getDimensions()
+  const slides = await Promise.all(
+    props.assets.map(async (asset) => {
+      const dimensions = await loadDimensions(asset.url).catch(() => fallbackDimensions)
+      return {
+        src: asset.url,
+        width: dimensions.width,
+        height: dimensions.height,
+        alt: asset.name,
+        assetId: asset.id
+      }
+    })
   )
+  if (!props.open || !lightbox || lightbox.pswp) return
+  activeAssetId.value = props.assets[index].id
+  lightbox.loadAndOpen(index, slides)
 }
 
 onMounted(() => {
@@ -116,6 +130,9 @@ watch(
         </Button>
         <Button @click="emit('continue', activeAsset)">
           <GitBranchIcon data-icon="inline-start" />继续创作
+        </Button>
+        <Button variant="secondary" @click="emit('copy', activeAsset)">
+          <CopyIcon data-icon="inline-start" />复制图片
         </Button>
         <Button @click="emit('save', activeAsset)">
           <DownloadIcon data-icon="inline-start" />保存图片
