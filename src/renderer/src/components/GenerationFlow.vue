@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { Edge, Node, NodeMouseEvent } from '@vue-flow/core'
+import type { Edge, Node, NodeMouseEvent, VueFlowStore } from '@vue-flow/core'
+import type { Graph } from '@dagrejs/dagre'
 import type { GenerationJob, Project } from '../../../shared/image-types'
 import type { GenerationFlowNodeData } from './GenerationFlowNode.vue'
 import type { GenerationFlowLoadingNodeData } from './GenerationFlowLoadingNode.vue'
@@ -10,12 +11,14 @@ import { VueFlow } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
 import {
   FolderIcon,
+  FocusIcon,
   GitBranchIcon,
   ImagePlusIcon,
   LayoutDashboardIcon,
+  LayoutGridIcon,
   PlusIcon
 } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, nextTick, shallowRef } from 'vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
 import GenerationFlowLoadingNode from './GenerationFlowLoadingNode.vue'
 import WindowControls from './WindowControls.vue'
@@ -29,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 const props = defineProps<{
   history: GenerationJob[]
@@ -46,6 +50,7 @@ const props = defineProps<{
 }>()
 
 const isMac = window.imageDeck.windowControls.platform === 'darwin'
+const flow = shallowRef<VueFlowStore>()
 
 const emit = defineEmits<{
   close: []
@@ -59,7 +64,7 @@ const emit = defineEmits<{
   cancelGeneration: []
 }>()
 
-const graph = computed(() => {
+function createLayout(): Graph {
   const layout = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
   layout.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 48, marginx: 60, marginy: 60 })
 
@@ -76,6 +81,12 @@ const graph = computed(() => {
     layout.setEdge(props.pendingGeneration.parentJobId, props.pendingGeneration.id)
   }
   dagre.layout(layout)
+
+  return layout
+}
+
+const graph = computed(() => {
+  const layout = createLayout()
 
   const nodes: Node<GenerationFlowNodeData | GenerationFlowLoadingNodeData>[] = props.history.map(
     (job) => {
@@ -133,6 +144,28 @@ const graph = computed(() => {
   }
   return { nodes, edges }
 })
+
+function setFlow(instance: VueFlowStore): void {
+  flow.value = instance
+}
+
+async function fitCanvas(duration = 300): Promise<void> {
+  await nextTick()
+  await flow.value?.fitView({ padding: 0.16, minZoom: 0.15, maxZoom: 1.2, duration })
+}
+
+async function formatLayout(): Promise<void> {
+  if (!flow.value || (!props.history.length && !props.pendingGeneration)) return
+
+  const layout = createLayout()
+  for (const node of flow.value.getNodes.value) {
+    const point = layout.node(node.id)
+    if (point) {
+      flow.value.updateNode(node.id, { position: { x: point.x - 144, y: point.y - 75 } })
+    }
+  }
+  await fitCanvas(420)
+}
 
 function selectNode({ node }: NodeMouseEvent): void {
   const job = props.history.find((item) => item.id === node.id)
@@ -222,6 +255,7 @@ function selectNode({ node }: NodeMouseEvent): void {
         :nodes-connectable="false"
         :delete-key-code="null"
         class="generation-flow"
+        @pane-ready="setFlow"
         @node-click="selectNode"
       >
         <template #node-generation="{ data, selected }">
@@ -234,6 +268,41 @@ function selectNode({ node }: NodeMouseEvent): void {
         <MiniMap pannable zoomable />
         <Controls :show-interactive="false" />
       </VueFlow>
+      <TooltipProvider>
+        <div
+          class="absolute left-4 top-4 flex items-center gap-1 rounded-xl border bg-card/90 p-1 shadow-lg backdrop-blur-xl"
+          aria-label="画布辅助工具"
+        >
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="适应画布"
+                :disabled="!history.length && !pendingGeneration"
+                @click="fitCanvas()"
+              >
+                <FocusIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">适应画布</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="整理节点布局"
+                :disabled="!history.length && !pendingGeneration"
+                @click="formatLayout"
+              >
+                <LayoutGridIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">整理节点布局</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
       <div
         v-if="!history.length && !pendingGeneration"
         class="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
