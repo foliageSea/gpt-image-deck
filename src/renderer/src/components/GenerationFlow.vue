@@ -339,7 +339,7 @@ function selectNode({ node }: NodeMouseEvent): void {
   --vf-node-color: var(--foreground);
   --vf-handle: var(--primary);
   --vf-edge: var(--muted-foreground);
-  background: color-mix(in oklab, var(--background) 72%, transparent);
+  background: color-mix(in oklab, var(--background) 48%, transparent);
 }
 
 .generation-flow .vue-flow__edge-path {
