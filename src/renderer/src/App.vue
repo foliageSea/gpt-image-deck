@@ -47,29 +47,15 @@ import { Card } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle
-} from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
   Select,
   SelectContent,
@@ -866,7 +852,6 @@ onMounted(load)
             <div>
               <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary">Create</p>
               <h2 class="mt-1 text-xl font-semibold tracking-tight">构建你的画面</h2>
-              <p class="mt-1 text-xs text-muted-foreground">描述想法，添加参考，然后生成。</p>
             </div>
 
             <FieldGroup>
@@ -889,8 +874,7 @@ onMounted(load)
                   placeholder="一张电影感的产品照片，柔和侧光，深色背景，精致材质细节……"
                   :aria-invalid="!form.prompt.trim() && form.prompt.length > 0"
                 />
-                <FieldDescription class="flex justify-between">
-                  <span>支持中英文自然语言</span>
+                <FieldDescription class="flex justify-end">
                   <span>{{ form.prompt.length }}/32000</span>
                 </FieldDescription>
               </Field>
@@ -1074,9 +1058,6 @@ onMounted(load)
               <Skeleton v-for="index in form.n" :key="index" class="aspect-square rounded-2xl" />
               <div class="col-span-full mt-3 text-center">
                 <p class="text-sm font-medium">正在构建画面</p>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  高质量图片可能需要一些时间，请保持应用开启。
-                </p>
               </div>
             </div>
 
@@ -1084,9 +1065,6 @@ onMounted(load)
               <EmptyHeader>
                 <EmptyMedia variant="icon"><ImageIcon /></EmptyMedia>
                 <EmptyTitle>从一个想法开始</EmptyTitle>
-                <EmptyDescription
-                  >输入提示词并设置画幅。生成结果会出现在这块画布中，并自动保存到历史。</EmptyDescription
-                >
               </EmptyHeader>
               <EmptyContent>
                 <Button
@@ -1241,7 +1219,6 @@ onMounted(load)
     <SheetContent class="gap-0 p-0" side="right">
       <SheetHeader class="sr-only">
         <SheetTitle>历史记录</SheetTitle>
-        <SheetDescription>查看、复用或删除历史生成任务。</SheetDescription>
       </SheetHeader>
       <HistoryPanel
         :history="history"
@@ -1259,16 +1236,6 @@ onMounted(load)
     <DialogContent :show-close-button="false">
       <DialogHeader>
         <DialogTitle>复用这次创作？</DialogTitle>
-        <DialogDescription>
-          <template v-if="pendingReuseJob?.request.referenceCount">
-            这次任务使用了 {{ pendingReuseJob.request.referenceCount }}
-            张参考图。原参考图尚未保存在历史中，载入后需要重新选择。
-          </template>
-          <template v-else-if="references.length">
-            当前已选择
-            {{ references.length }} 张参考图。建议清空，避免把文生图任务意外变成图片编辑。
-          </template>
-        </DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" @click="pendingReuseJob = null">取消</Button>
@@ -1290,9 +1257,6 @@ onMounted(load)
     <DialogContent :show-close-button="false">
       <DialogHeader>
         <DialogTitle>永久删除这条历史？</DialogTitle>
-        <DialogDescription>
-          任务中的 {{ pendingDeleteJob?.assets.length ?? 0 }} 张本地图片也会被删除，此操作无法撤销。
-        </DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" :disabled="deleting" @click="pendingDeleteJob = null"
@@ -1310,7 +1274,6 @@ onMounted(load)
     <DialogContent class="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>项目管理</DialogTitle>
-        <DialogDescription>每个项目拥有独立的历史记录和创作流程。</DialogDescription>
       </DialogHeader>
       <FieldGroup>
         <Field>
@@ -1352,9 +1315,6 @@ onMounted(load)
               <Trash2Icon data-icon="inline-start" />删除项目
             </Button>
           </div>
-          <FieldDescription v-if="projectState.projects.length === 1">
-            至少需要保留一个项目。
-          </FieldDescription>
         </Field>
       </FieldGroup>
     </DialogContent>
@@ -1367,9 +1327,6 @@ onMounted(load)
     <DialogContent :show-close-button="false">
       <DialogHeader>
         <DialogTitle>永久删除“{{ pendingDeleteProject?.name }}”？</DialogTitle>
-        <DialogDescription>
-          该项目中的历史记录和本地图片将一并删除，此操作无法撤销。
-        </DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" :disabled="deletingProject" @click="pendingDeleteProject = null">
@@ -1401,13 +1358,6 @@ onMounted(load)
                 : '基于节点继续创作'
           }}
         </DialogTitle>
-        <DialogDescription>
-          {{
-            flowCreation?.job
-              ? '当前图片会作为参考，生成结果将自动连接到该节点并保留在流程画布中。'
-              : '从提示词创建一组图片，并作为独立的起始节点加入当前流程。'
-          }}
-        </DialogDescription>
       </DialogHeader>
       <div v-if="flowCreation" class="flex flex-col gap-5">
         <div
@@ -1450,16 +1400,7 @@ onMounted(load)
               "
               :disabled="flowGenerating"
             />
-            <FieldDescription class="flex justify-between">
-              <span>
-                {{
-                  !flowCreation.job
-                    ? '创建一个新的流程起点'
-                    : flowCreation.variant
-                      ? '灵活生成相似变体'
-                      : '高度还原来源图片'
-                }}
-              </span>
+            <FieldDescription class="flex justify-end">
               <span>{{ flowCreation.prompt.length }}/32000</span>
             </FieldDescription>
           </Field>
@@ -1511,13 +1452,6 @@ onMounted(load)
                 <PlusIcon class="size-4" />
               </button>
             </div>
-            <FieldDescription>
-              {{
-                flowCreation.job
-                  ? '来源节点固定作为第一张参考图，可继续添加 PNG、JPG 或 WebP。'
-                  : '可添加 PNG、JPG 或 WebP 作为新节点的参考图片。'
-              }}
-            </FieldDescription>
           </Field>
           <div class="grid grid-cols-3 gap-3">
             <Field>
@@ -1582,7 +1516,6 @@ onMounted(load)
   <PromptLibraryDialog
     v-model:open="promptsOpen"
     :prompts="prompts"
-    :target-label="promptTarget === 'flow' ? '流程节点' : '创作输入框'"
     @select="fillPrompt"
     @create="createPrompt"
     @update="updatePrompt"
@@ -1593,9 +1526,6 @@ onMounted(load)
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>连接设置</DialogTitle>
-        <DialogDescription
-          >连接 OpenAI 官方接口或兼容的 Images API。API Key 不会进入页面上下文。</DialogDescription
-        >
       </DialogHeader>
       <FieldGroup>
         <Field>
@@ -1606,13 +1536,6 @@ onMounted(load)
             type="password"
             :placeholder="settings.hasApiKey ? '已安全保存，输入可替换' : 'sk-…'"
           />
-          <FieldDescription>
-            {{
-              settings.secureStorageAvailable
-                ? '将使用系统安全存储加密。'
-                : '系统安全存储不可用，将仅保留到应用退出。'
-            }}
-          </FieldDescription>
         </Field>
         <Field>
           <FieldLabel for="base-url">Base URL</FieldLabel>
@@ -1621,12 +1544,6 @@ onMounted(load)
             v-model="settingsForm.baseUrl"
             placeholder="https://api.openai.com 或 https://api.openai.com/v1"
           />
-          <FieldDescription v-if="settingsForm.baseUrl.trim().startsWith('http://')">
-            当前使用未加密的 HTTP 连接，请仅连接可信网络中的服务。
-          </FieldDescription>
-          <FieldDescription v-else>
-            生图请求固定使用 /v1/images/generations；末尾的 /v1 可省略。
-          </FieldDescription>
         </Field>
         <Field>
           <FieldLabel for="model">模型名称</FieldLabel>
@@ -1647,7 +1564,6 @@ onMounted(load)
               恢复默认
             </Button>
           </div>
-          <FieldDescription>背景会覆盖整个窗口、自绘标题栏和流程模式。</FieldDescription>
         </Field>
       </FieldGroup>
       <Alert
@@ -1689,10 +1605,7 @@ onMounted(load)
       @close="previewOpen = false"
       @click.self="previewOpen = false"
     >
-      <DialogHeader class="sr-only"
-        ><DialogTitle>图片预览</DialogTitle
-        ><DialogDescription>查看生成结果</DialogDescription></DialogHeader
-      >
+      <DialogHeader class="sr-only"><DialogTitle>图片预览</DialogTitle></DialogHeader>
       <img
         v-if="selectedAsset"
         :src="selectedAsset.url"

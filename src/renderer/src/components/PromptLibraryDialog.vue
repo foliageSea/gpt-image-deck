@@ -14,12 +14,11 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -28,7 +27,6 @@ import { Textarea } from '@/components/ui/textarea'
 const props = defineProps<{
   open: boolean
   prompts: PromptTemplate[]
-  targetLabel: string
 }>()
 
 const emit = defineEmits<{
@@ -96,7 +94,6 @@ function savePrompt(): void {
     <DialogContent class="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-3xl">
       <DialogHeader>
         <DialogTitle>提示词库</DialogTitle>
-        <DialogDescription>管理常用提示词，选择后自动填入{{ targetLabel }}。</DialogDescription>
       </DialogHeader>
 
       <div class="grid min-h-0 flex-1 gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -159,7 +156,6 @@ function savePrompt(): void {
               <EmptyHeader>
                 <EmptyMedia variant="icon"><BookOpenIcon /></EmptyMedia>
                 <EmptyTitle>{{ search ? '没有匹配的提示词' : '还没有保存提示词' }}</EmptyTitle>
-                <EmptyDescription>在右侧创建一条常用提示词。</EmptyDescription>
               </EmptyHeader>
             </Empty>
           </ScrollArea>

@@ -23,7 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -160,13 +160,6 @@ function formatDate(value: string): string {
         <EmptyHeader>
           <EmptyMedia variant="icon"><HistoryIcon /></EmptyMedia>
           <EmptyTitle>{{ history.length ? '没有匹配的作品' : '还没有作品' }}</EmptyTitle>
-          <EmptyDescription>
-            {{
-              history.length
-                ? '尝试其他关键词或关闭收藏筛选。'
-                : '完成首次生成后，会在这里建立你的本地作品集。'
-            }}
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     </ScrollArea>

@@ -33,9 +33,6 @@ defineProps<{
       </div>
     </div>
     <div class="nodrag flex items-center justify-between gap-2 border-t bg-muted/25 px-3 py-2">
-      <span class="text-[10px] text-muted-foreground">
-        {{ data.cancelling ? '正在取消请求…' : '结果将在此处生成' }}
-      </span>
       <Button variant="outline" size="xs" :disabled="data.cancelling" @click.stop="data.onCancel">
         <XIcon data-icon="inline-start" />停止
       </Button>

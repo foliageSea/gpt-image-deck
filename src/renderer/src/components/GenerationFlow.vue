@@ -194,7 +194,6 @@ function selectNode({ node }: NodeMouseEvent): void {
       </div>
       <div>
         <h2 class="text-sm font-semibold">创作流程</h2>
-        <p class="text-xs text-muted-foreground">拖动画布探索分支，选择任意节点继续生成</p>
       </div>
       <Badge variant="outline" class="ml-2">
         {{ history.length + (pendingGeneration ? 1 : 0) }} 个节点
@@ -234,9 +233,6 @@ function selectNode({ node }: NodeMouseEvent): void {
         <Button size="sm" :disabled="projectBusy" @click="emit('createRoot')">
           <ImagePlusIcon data-icon="inline-start" />新建节点
         </Button>
-        <span class="hidden text-xs text-muted-foreground sm:inline"
-          >双击节点可在工作台查看作品</span
-        >
         <Button variant="secondary" size="sm" @click="emit('close')">
           <LayoutDashboardIcon data-icon="inline-start" />工作台模式
         </Button>
@@ -317,9 +313,6 @@ function selectNode({ node }: NodeMouseEvent): void {
           </div>
           <div class="flex flex-col gap-1.5">
             <h3 class="text-base font-semibold">创建第一个流程节点</h3>
-            <p class="text-sm leading-6 text-muted-foreground">
-              先在工作台生成一组图片，后续即可从任意节点继续创作和探索分支。
-            </p>
           </div>
           <Button @click="emit('createRoot')">
             <ImagePlusIcon data-icon="inline-start" />新建节点
