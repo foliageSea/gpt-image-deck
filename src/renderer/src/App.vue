@@ -520,7 +520,7 @@ function openFlowCreation(job: GenerationJob, variant: boolean): void {
     size: job.request.size,
     quality: job.request.quality,
     n: job.request.n,
-    leadingAssets: priorSourceAssets(job),
+    leadingAssets: [],
     leadingReferences: [],
     references: []
   }
