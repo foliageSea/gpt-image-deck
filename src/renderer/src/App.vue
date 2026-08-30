@@ -126,9 +126,35 @@ type FlowCreation = {
   size: string
   quality: GenerationRequest['quality']
   n: number
+  leadingAssets: GeneratedAsset[]
+  leadingReferences: ReferenceImage[]
   references: ReferenceImage[]
 }
 const flowCreation = ref<FlowCreation | null>(null)
+
+const availableLeadingAssets = computed(() => {
+  const job = flowCreation.value?.job
+  return job ? priorSourceAssets(job) : []
+})
+
+function priorSourceAssets(job: GenerationJob): GeneratedAsset[] {
+  const jobsById = new Map(history.value.map((item) => [item.id, item]))
+  const assetsById = new Map(
+    history.value.flatMap((item) => item.assets.map((asset) => [asset.id, asset] as const))
+  )
+  const assets: GeneratedAsset[] = []
+  const visited = new Set<string>()
+  let current: GenerationJob | undefined = job
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+    if (current.sourceAssetId) {
+      const asset = assetsById.get(current.sourceAssetId)
+      if (asset) assets.push(asset)
+    }
+    current = current.parentJobId ? jobsById.get(current.parentJobId) : undefined
+  }
+  return assets.reverse().slice(-15)
+}
 
 const form = reactive<GenerationRequest>({
   projectId: '',
@@ -494,6 +520,8 @@ function openFlowCreation(job: GenerationJob, variant: boolean): void {
     size: job.request.size,
     quality: job.request.quality,
     n: job.request.n,
+    leadingAssets: priorSourceAssets(job),
+    leadingReferences: [],
     references: []
   }
 }
@@ -505,26 +533,90 @@ function openNewFlowCreation(): void {
     size: form.size,
     quality: form.quality,
     n: form.n,
+    leadingAssets: [],
+    leadingReferences: [],
     references: []
   }
 }
 
-async function pickFlowReferences(): Promise<void> {
+async function pickFlowReferences(position: 'before' | 'after' = 'after'): Promise<void> {
   const creation = flowCreation.value
   if (!creation) return
   try {
     const picked = await api.pickReferenceImages()
-    const existingIds = new Set(creation.references.map((item) => item.id))
+    const existingIds = new Set(
+      [...creation.leadingReferences, ...creation.references].map((item) => item.id)
+    )
     const unique = picked.filter((item) => !existingIds.has(item.id))
-    creation.references = [...creation.references, ...unique].slice(0, creation.job ? 15 : 16)
+    const available =
+      (creation.job ? 15 : 16) -
+      creation.leadingAssets.length -
+      creation.leadingReferences.length -
+      creation.references.length
+    if (position === 'before') {
+      creation.leadingReferences.push(...unique.slice(0, available))
+    } else {
+      creation.references.push(...unique.slice(0, available))
+    }
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '参考图片读取失败。')
   }
 }
 
-function removeFlowReference(id: string): void {
+function removeFlowReference(id: string, position: 'before' | 'after' = 'after'): void {
   if (!flowCreation.value) return
-  flowCreation.value.references = flowCreation.value.references.filter((item) => item.id !== id)
+  const key = position === 'before' ? 'leadingReferences' : 'references'
+  flowCreation.value[key] = flowCreation.value[key].filter((item) => item.id !== id)
+}
+
+function toggleLeadingAsset(asset: GeneratedAsset): void {
+  const creation = flowCreation.value
+  if (!creation) return
+  if (creation.leadingAssets.some((item) => item.id === asset.id)) {
+    creation.leadingAssets = creation.leadingAssets.filter((item) => item.id !== asset.id)
+    return
+  }
+  if (
+    creation.leadingAssets.length +
+      creation.leadingReferences.length +
+      creation.references.length >=
+    15
+  ) {
+    toast.info('参考图片最多 16 张（含当前节点）。')
+    return
+  }
+  creation.leadingAssets.push(asset)
+}
+
+function isLeadingAssetSelected(asset: GeneratedAsset): boolean {
+  return flowCreation.value?.leadingAssets.some((item) => item.id === asset.id) ?? false
+}
+
+function flowReferenceOrder(
+  kind: 'leading-asset' | 'leading-reference' | 'source' | 'reference',
+  id?: string
+): number | undefined {
+  const creation = flowCreation.value
+  if (!creation) return undefined
+  if (kind === 'leading-asset') {
+    const index = creation.leadingAssets.findIndex((item) => item.id === id)
+    return index < 0 ? undefined : index + 1
+  }
+  if (kind === 'leading-reference') {
+    const index = creation.leadingReferences.findIndex((item) => item.id === id)
+    return index < 0 ? undefined : creation.leadingAssets.length + index + 1
+  }
+  const sourceOrder = creation.leadingAssets.length + creation.leadingReferences.length + 1
+  if (kind === 'source') return creation.job ? sourceOrder : undefined
+  const index = creation.references.findIndex((item) => item.id === id)
+  if (index < 0) return undefined
+  return (
+    creation.leadingAssets.length +
+    creation.leadingReferences.length +
+    (creation.job ? 1 : 0) +
+    index +
+    1
+  )
 }
 
 async function generateFromFlow(): Promise<void> {
@@ -549,6 +641,9 @@ async function generateFromFlow(): Promise<void> {
   flowCreation.value = null
   flowGenerating.value = true
   try {
+    const leadingAssetReferences = await Promise.all(
+      creation.leadingAssets.map((item) => api.useAssetAsReference(item.id))
+    )
     const sourceReference = asset ? await api.useAssetAsReference(asset.id) : null
     if (pendingFlowGeneration.value?.id !== requestId || pendingFlowGeneration.value.cancelling)
       return
@@ -557,6 +652,8 @@ async function generateFromFlow(): Promise<void> {
         projectId: projectState.value.currentProjectId,
         prompt,
         referenceIds: [
+          ...leadingAssetReferences.map((item) => item.id),
+          ...creation.leadingReferences.map((item) => item.id),
           ...(sourceReference ? [sourceReference.id] : []),
           ...creation.references.map((item) => item.id)
         ],
@@ -1534,11 +1631,85 @@ onMounted(load)
               <span>{{ flowCreation.prompt.length }}/32000</span>
             </FieldDescription>
           </Field>
+          <Field v-if="flowCreation.job">
+            <FieldLabel>当前节点前的参考图</FieldLabel>
+            <div class="grid grid-cols-6 gap-2">
+              <button
+                v-for="asset in availableLeadingAssets"
+                :key="asset.id"
+                type="button"
+                :class="[
+                  'relative aspect-square overflow-hidden rounded-lg border bg-muted transition-colors disabled:pointer-events-none disabled:opacity-50',
+                  isLeadingAssetSelected(asset)
+                    ? 'border-primary ring-2 ring-primary/30'
+                    : 'hover:border-primary/50'
+                ]"
+                :disabled="flowGenerating"
+                :aria-pressed="isLeadingAssetSelected(asset)"
+                @click="toggleLeadingAsset(asset)"
+              >
+                <img :src="asset.url" :alt="asset.name" class="size-full object-cover" />
+                <Badge
+                  v-if="flowReferenceOrder('leading-asset', asset.id)"
+                  class="absolute left-1 top-1"
+                >
+                  {{ flowReferenceOrder('leading-asset', asset.id) }}
+                </Badge>
+                <Badge
+                  v-if="isLeadingAssetSelected(asset)"
+                  class="absolute bottom-1 left-1"
+                  variant="secondary"
+                >
+                  <CircleCheckIcon />已选
+                </Badge>
+              </button>
+              <div
+                v-for="image in flowCreation.leadingReferences"
+                :key="image.id"
+                class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
+              >
+                <img :src="image.url" :alt="image.name" class="size-full object-cover" />
+                <Badge class="absolute left-1 top-1">
+                  {{ flowReferenceOrder('leading-reference', image.id) }}
+                </Badge>
+                <Button
+                  variant="destructive"
+                  size="icon-xs"
+                  class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
+                  :disabled="flowGenerating"
+                  aria-label="移除当前节点前的参考图"
+                  @click="removeFlowReference(image.id, 'before')"
+                >
+                  <XIcon />
+                </Button>
+              </div>
+              <button
+                v-if="
+                  flowCreation.leadingAssets.length +
+                    flowCreation.leadingReferences.length +
+                    flowCreation.references.length <
+                  15
+                "
+                type="button"
+                class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                :disabled="flowGenerating"
+                aria-label="上传当前节点前的参考图片"
+                @click="pickFlowReferences('before')"
+              >
+                <PlusIcon class="size-4" />
+              </button>
+            </div>
+          </Field>
           <Field>
             <div class="flex items-center justify-between">
-              <FieldLabel>参考图片</FieldLabel>
+              <FieldLabel>{{ flowCreation.job ? '当前节点后的参考图' : '参考图片' }}</FieldLabel>
               <span class="text-xs text-muted-foreground">
-                {{ flowCreation.references.length + (flowCreation.job ? 1 : 0) }}/16
+                {{
+                  flowCreation.references.length +
+                  flowCreation.leadingAssets.length +
+                  flowCreation.leadingReferences.length +
+                  (flowCreation.job ? 1 : 0)
+                }}/16
               </span>
             </div>
             <div class="grid grid-cols-6 gap-2">
@@ -1552,6 +1723,9 @@ onMounted(load)
                   alt="来源节点参考图"
                   class="size-full object-cover"
                 />
+                <Badge class="absolute left-1 top-1">
+                  {{ flowReferenceOrder('source') }}
+                </Badge>
                 <Badge class="absolute bottom-1 left-1" variant="secondary">节点</Badge>
               </div>
               <div
@@ -1560,6 +1734,9 @@ onMounted(load)
                 class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
               >
                 <img :src="image.url" :alt="image.name" class="size-full object-cover" />
+                <Badge class="absolute left-1 top-1">
+                  {{ flowReferenceOrder('reference', image.id) }}
+                </Badge>
                 <Button
                   variant="destructive"
                   size="icon-xs"
@@ -1572,12 +1749,17 @@ onMounted(load)
                 </Button>
               </div>
               <button
-                v-if="flowCreation.references.length < (flowCreation.job ? 15 : 16)"
+                v-if="
+                  flowCreation.references.length +
+                    flowCreation.leadingAssets.length +
+                    flowCreation.leadingReferences.length <
+                  (flowCreation.job ? 15 : 16)
+                "
                 type="button"
                 class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 :disabled="flowGenerating"
                 aria-label="继续上传参考图片"
-                @click="pickFlowReferences"
+                @click="pickFlowReferences('after')"
               >
                 <PlusIcon class="size-4" />
               </button>
