@@ -845,7 +845,31 @@ onMounted(load)
           </div>
         </Field>
         <Field>
-          <FieldLabel>当前项目</FieldLabel>
+          <FieldLabel for="managed-project">选择项目</FieldLabel>
+          <Select
+            :model-value="projectState.currentProjectId"
+            :disabled="projectBusy || changingProject"
+            @update:model-value="switchProject"
+          >
+            <SelectTrigger id="managed-project" class="w-full">
+              <SelectValue placeholder="选择项目" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem
+                  v-for="project in projectState.projects"
+                  :key="project.id"
+                  :value="project.id"
+                >
+                  {{ project.name }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <FieldDescription>切换后将显示该项目的历史记录和管理操作。</FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel>项目详情</FieldLabel>
           <div class="rounded-xl border p-3">
             <div class="flex items-center gap-2">
               <div class="min-w-0 flex-1">
@@ -881,7 +905,7 @@ onMounted(load)
               <Button
                 variant="destructive"
                 size="sm"
-                :disabled="projectState.projects.length === 1"
+                :disabled="projectState.projects.length === 1 || projectBusy || changingProject"
                 @click="confirmDeleteProject"
               >
                 <Trash2Icon data-icon="inline-start" />删除项目
