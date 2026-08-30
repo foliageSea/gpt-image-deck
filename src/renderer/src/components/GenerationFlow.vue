@@ -14,13 +14,14 @@ import {
   FocusIcon,
   GitBranchIcon,
   ImagePlusIcon,
-  LayoutDashboardIcon,
   LayoutGridIcon,
   PlusIcon,
   Settings2Icon
 } from '@lucide/vue'
 import { computed, nextTick, shallowRef } from 'vue'
+import type { GenerationFlowErrorNodeData } from './GenerationFlowErrorNode.vue'
 import GenerationFlowMiniMapNode from './GenerationFlowMiniMapNode.vue'
+import GenerationFlowErrorNode from './GenerationFlowErrorNode.vue'
 import GenerationFlowNode from './GenerationFlowNode.vue'
 import GenerationFlowLoadingNode from './GenerationFlowLoadingNode.vue'
 import WindowControls from './WindowControls.vue'
@@ -43,19 +44,22 @@ const props = defineProps<{
   selectedJobId?: string
   projectBusy?: boolean
   backgroundImageUrl?: string
-  pendingGeneration?: {
+  pendingGenerations?: {
     id: string
     parentJobId?: string
     prompt: string
+    branchIndex: number
+    branchCount: number
+    status: 'loading' | 'error'
+    error?: string
     cancelling: boolean
-  }
+  }[]
 }>()
 
 const isMac = window.imageDeck.windowControls.platform === 'darwin'
 const flow = shallowRef<VueFlowStore>()
 
 const emit = defineEmits<{
-  close: []
   select: [job: GenerationJob]
   preview: [job: GenerationJob]
   create: [job: GenerationJob, variant: boolean]
@@ -63,7 +67,8 @@ const emit = defineEmits<{
   switchProject: [projectId: unknown]
   manageProjects: []
   delete: [job: GenerationJob]
-  cancelGeneration: []
+  cancelGeneration: [requestId: string]
+  removeGeneration: [requestId: string]
   openSettings: []
 }>()
 
@@ -72,16 +77,18 @@ function createLayout(): Graph {
   layout.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 48, marginx: 60, marginy: 60 })
 
   for (const job of props.history) layout.setNode(job.id, { width: 288, height: 150 })
-  if (props.pendingGeneration) {
-    layout.setNode(props.pendingGeneration.id, { width: 288, height: 150 })
+  for (const generation of props.pendingGenerations ?? []) {
+    layout.setNode(generation.id, { width: 288, height: 150 })
   }
   for (const job of props.history) {
     if (job.parentJobId && layout.hasNode(job.parentJobId)) {
       layout.setEdge(job.parentJobId, job.id)
     }
   }
-  if (props.pendingGeneration?.parentJobId && layout.hasNode(props.pendingGeneration.parentJobId)) {
-    layout.setEdge(props.pendingGeneration.parentJobId, props.pendingGeneration.id)
+  for (const generation of props.pendingGenerations ?? []) {
+    if (generation.parentJobId && layout.hasNode(generation.parentJobId)) {
+      layout.setEdge(generation.parentJobId, generation.id)
+    }
   }
   dagre.layout(layout)
 
@@ -91,35 +98,42 @@ function createLayout(): Graph {
 const graph = computed(() => {
   const layout = createLayout()
 
-  const nodes: Node<GenerationFlowNodeData | GenerationFlowLoadingNodeData>[] = props.history.map(
-    (job) => {
-      const point = layout.node(job.id)
-      return {
-        id: job.id,
-        type: 'generation',
-        position: { x: point.x - 144, y: point.y - 75 },
-        selected: job.id === props.selectedJobId,
-        data: {
-          job,
-          onSelect: (value) => emit('preview', value),
-          onContinue: (value, variant) => emit('create', value, variant),
-          onDelete: (value) => emit('delete', value)
-        }
+  const nodes: Node<
+    GenerationFlowNodeData | GenerationFlowLoadingNodeData | GenerationFlowErrorNodeData
+  >[] = props.history.map((job) => {
+    const point = layout.node(job.id)
+    return {
+      id: job.id,
+      type: 'generation',
+      position: { x: point.x - 144, y: point.y - 75 },
+      selected: job.id === props.selectedJobId,
+      data: {
+        job,
+        onSelect: (value) => emit('preview', value),
+        onContinue: (value, variant) => emit('create', value, variant),
+        onDelete: (value) => emit('delete', value)
       }
     }
-  )
-  if (props.pendingGeneration) {
-    const point = layout.node(props.pendingGeneration.id)
+  })
+  for (const generation of props.pendingGenerations ?? []) {
+    const point = layout.node(generation.id)
+    const branchLabel =
+      generation.branchCount > 1
+        ? `分支 ${generation.branchIndex}/${generation.branchCount}`
+        : undefined
     nodes.push({
-      id: props.pendingGeneration.id,
-      type: 'generation-loading',
+      id: generation.id,
+      type: generation.status === 'error' ? 'generation-error' : 'generation-loading',
       position: { x: point.x - 144, y: point.y - 75 },
       selectable: false,
       data: {
-        prompt: props.pendingGeneration.prompt,
-        hasParent: Boolean(props.pendingGeneration.parentJobId),
-        cancelling: props.pendingGeneration.cancelling,
-        onCancel: () => emit('cancelGeneration')
+        prompt: generation.prompt,
+        hasParent: Boolean(generation.parentJobId),
+        branchLabel,
+        cancelling: generation.cancelling,
+        onCancel: () => emit('cancelGeneration', generation.id),
+        error: generation.error,
+        onRemove: () => emit('removeGeneration', generation.id)
       }
     })
   }
@@ -136,14 +150,16 @@ const graph = computed(() => {
         ]
       : []
   )
-  if (props.pendingGeneration?.parentJobId && layout.hasNode(props.pendingGeneration.parentJobId)) {
-    edges.push({
-      id: `${props.pendingGeneration.parentJobId}-${props.pendingGeneration.id}`,
-      source: props.pendingGeneration.parentJobId,
-      target: props.pendingGeneration.id,
-      type: 'smoothstep',
-      animated: true
-    })
+  for (const generation of props.pendingGenerations ?? []) {
+    if (generation.parentJobId && layout.hasNode(generation.parentJobId)) {
+      edges.push({
+        id: `${generation.parentJobId}-${generation.id}`,
+        source: generation.parentJobId,
+        target: generation.id,
+        type: 'smoothstep',
+        animated: true
+      })
+    }
   }
   return { nodes, edges }
 })
@@ -158,7 +174,7 @@ async function fitCanvas(duration = 300): Promise<void> {
 }
 
 async function formatLayout(): Promise<void> {
-  if (!flow.value || (!props.history.length && !props.pendingGeneration)) return
+  if (!flow.value || (!props.history.length && !props.pendingGenerations?.length)) return
 
   const layout = createLayout()
   for (const node of flow.value.getNodes.value) {
@@ -199,7 +215,7 @@ function selectNode({ node }: NodeMouseEvent): void {
         <h2 class="text-sm font-semibold tracking-tight">Image Deck</h2>
       </div>
       <Badge variant="outline" class="ml-2">
-        {{ history.length + (pendingGeneration ? 1 : 0) }} 个节点
+        {{ history.length + (pendingGenerations?.length ?? 0) }} 个节点
       </Badge>
       <div
         :class="[
@@ -233,11 +249,8 @@ function selectNode({ node }: NodeMouseEvent): void {
         >
           <PlusIcon />
         </Button>
-        <Button size="sm" :disabled="projectBusy" @click="emit('createRoot')">
+        <Button size="sm" @click="emit('createRoot')">
           <ImagePlusIcon data-icon="inline-start" />新建节点
-        </Button>
-        <Button variant="secondary" size="sm" @click="emit('close')">
-          <LayoutDashboardIcon data-icon="inline-start" />工作台模式
         </Button>
         <Button variant="ghost" size="icon" aria-label="连接设置" @click="emit('openSettings')">
           <Settings2Icon />
@@ -248,7 +261,7 @@ function selectNode({ node }: NodeMouseEvent): void {
 
     <div class="relative z-10 min-h-0 flex-1">
       <VueFlow
-        :key="`${history.map((job) => job.id).join(':')}:${pendingGeneration?.id ?? ''}`"
+        :key="`${history.map((job) => job.id).join(':')}:${pendingGenerations?.map((item) => item.id).join(':') ?? ''}`"
         :nodes="graph.nodes"
         :edges="graph.edges"
         :min-zoom="0.15"
@@ -266,6 +279,9 @@ function selectNode({ node }: NodeMouseEvent): void {
         <template #node-generation-loading="{ data }">
           <GenerationFlowLoadingNode :data="data" />
         </template>
+        <template #node-generation-error="{ data }">
+          <GenerationFlowErrorNode :data="data" />
+        </template>
         <Background :gap="24" :size="1.25" pattern-color="var(--border)" />
         <MiniMap pannable zoomable aria-label="流程全局预览">
           <template #node-generation="nodeProps">
@@ -276,6 +292,9 @@ function selectNode({ node }: NodeMouseEvent): void {
           </template>
           <template #node-generation-loading="nodeProps">
             <GenerationFlowMiniMapNode v-bind="nodeProps" loading />
+          </template>
+          <template #node-generation-error="nodeProps">
+            <GenerationFlowMiniMapNode v-bind="nodeProps" />
           </template>
         </MiniMap>
         <Controls :show-interactive="false" />
@@ -291,7 +310,7 @@ function selectNode({ node }: NodeMouseEvent): void {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="适应画布"
-                :disabled="!history.length && !pendingGeneration"
+                :disabled="!history.length && !pendingGenerations?.length"
                 @click="fitCanvas()"
               >
                 <FocusIcon />
@@ -305,7 +324,7 @@ function selectNode({ node }: NodeMouseEvent): void {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="整理节点布局"
-                :disabled="!history.length && !pendingGeneration"
+                :disabled="!history.length && !pendingGenerations?.length"
                 @click="formatLayout"
               >
                 <LayoutGridIcon />
@@ -316,7 +335,7 @@ function selectNode({ node }: NodeMouseEvent): void {
         </div>
       </TooltipProvider>
       <div
-        v-if="!history.length && !pendingGeneration"
+        v-if="!history.length && !pendingGenerations?.length"
         class="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
       >
         <div

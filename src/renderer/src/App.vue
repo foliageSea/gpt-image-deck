@@ -11,40 +11,26 @@ import type {
   ReferenceImage
 } from '../../shared/image-types'
 import {
-  CopyIcon,
+  BookOpenIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
   DownloadIcon,
-  FolderOpenIcon,
-  GitBranchIcon,
-  HeartIcon,
-  HistoryIcon,
   ImageIcon,
-  ImagesIcon,
   LoaderCircleIcon,
-  FolderIcon,
   PlusIcon,
-  RotateCcwIcon,
-  Settings2Icon,
   SparklesIcon,
   Trash2Icon,
   UploadCloudIcon,
-  WandSparklesIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
-  BookOpenIcon,
-  InfoIcon,
   XIcon
 } from '@lucide/vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
-import HistoryPanel from '@/components/HistoryPanel.vue'
 import ImagePreview from '@/components/ImagePreview.vue'
 import GenerationFlow from '@/components/GenerationFlow.vue'
 import PromptLibraryDialog from '@/components/PromptLibraryDialog.vue'
-import WindowControls from '@/components/WindowControls.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -52,11 +38,8 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
   Select,
   SelectContent,
@@ -65,14 +48,10 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Slider } from '@/components/ui/slider'
 import { Toaster } from '@/components/ui/sonner'
 import { Textarea } from '@/components/ui/textarea'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 const api = window.imageDeck
-const isMac = api.windowControls.platform === 'darwin'
 const settings = ref<AppSettings>({
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-image-2',
@@ -83,8 +62,6 @@ const backgroundImageUrl = computed(() => settings.value.backgroundImageUrl)
 const settingsForm = reactive({ baseUrl: '', model: '', apiKey: '' })
 const settingsOpen = ref(false)
 const testing = ref(false)
-const generating = ref(false)
-const references = ref<ReferenceImage[]>([])
 const projectState = ref<ProjectState>({ projects: [], currentProjectId: '' })
 const projectsOpen = ref(false)
 const projectName = ref('')
@@ -101,23 +78,24 @@ const history = ref<GenerationJob[]>([])
 const selectedJob = ref<GenerationJob | null>(null)
 const selectedAsset = ref<GeneratedAsset | null>(null)
 const previewOpen = ref(false)
-const historyOpen = ref(false)
-const flowOpen = ref(true)
-const flowGenerating = ref(false)
-const pendingFlowGeneration = ref<{
-  id: string
-  parentJobId?: string
-  prompt: string
-  cancelling: boolean
-} | null>(null)
+const pendingFlowGenerations = ref<
+  {
+    id: string
+    projectId: string
+    parentJobId?: string
+    prompt: string
+    branchIndex: number
+    branchCount: number
+    status: 'loading' | 'error'
+    error?: string
+    cancelling: boolean
+  }[]
+>([])
 const prompts = ref<PromptTemplate[]>([])
 const promptsOpen = ref(false)
-const promptTarget = ref<'main' | 'flow'>('main')
 const pendingDeleteJob = ref<GenerationJob | null>(null)
-const pendingReuseJob = ref<GenerationJob | null>(null)
 const deleting = ref(false)
 type Feedback = { type: 'info' | 'success' | 'error'; title: string; message: string }
-const generationFeedback = ref<Feedback | null>(null)
 const connectionFeedback = ref<Feedback | null>(null)
 type FlowCreation = {
   job?: GenerationJob
@@ -169,23 +147,21 @@ const form = reactive<GenerationRequest>({
   inputFidelity: 'low'
 })
 
-const canGenerate = computed(
-  () => Boolean(form.projectId) && form.prompt.trim().length > 0 && !generating.value
+const currentPendingFlowGenerations = computed(() =>
+  pendingFlowGenerations.value.filter(
+    (generation) => generation.projectId === projectState.value.currentProjectId
+  )
 )
 const projectBusy = computed(
-  () => generating.value || flowGenerating.value || exportingProject.value || importingProject.value
+  () =>
+    currentPendingFlowGenerations.value.some((generation) => generation.status === 'loading') ||
+    exportingProject.value ||
+    importingProject.value
 )
 const currentProject = computed(() =>
   projectState.value.projects.find((project) => project.id === projectState.value.currentProjectId)
 )
 const currentAssets = computed(() => selectedJob.value?.assets ?? [])
-const favoriteAssets = computed(() => currentAssets.value.filter((asset) => asset.favorite))
-const compressionSlider = computed({
-  get: () => [form.compression],
-  set: (value: number[]) => {
-    form.compression = value[0] ?? 90
-  }
-})
 
 watch(
   () => form.format,
@@ -200,21 +176,6 @@ watch(
 watch(projectsOpen, (open) => {
   if (!open) cancelProjectNameEditing()
 })
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value))
-}
-
-function formatBytes(bytes: number): string {
-  return bytes < 1024 * 1024
-    ? `${Math.round(bytes / 1024)} KB`
-    : `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
 
 async function load(): Promise<void> {
   try {
@@ -243,16 +204,15 @@ async function load(): Promise<void> {
 
 function resetProjectContext(): void {
   selectJob(null)
-  references.value = []
-  form.referenceIds = []
-  form.parentJobId = undefined
-  form.sourceAssetId = undefined
   flowCreation.value = null
-  pendingReuseJob.value = null
 }
 
 async function applyProjectState(next: ProjectState): Promise<void> {
   projectState.value = next
+  const projectIds = new Set(next.projects.map((project) => project.id))
+  pendingFlowGenerations.value = pendingFlowGenerations.value.filter((generation) =>
+    projectIds.has(generation.projectId)
+  )
   form.projectId = next.currentProjectId
   editingProjectName.value =
     next.projects.find((project) => project.id === next.currentProjectId)?.name ?? ''
@@ -372,134 +332,20 @@ function confirmDeleteProject(): void {
   projectsOpen.value = false
 }
 
-async function pickReferences(): Promise<void> {
-  try {
-    const picked = await api.pickReferenceImages()
-    const merged = [...references.value, ...picked].slice(0, 16)
-    references.value = merged
-    form.referenceIds = merged.map((item) => item.id)
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : '参考图片读取失败。')
-  }
-}
-
-function removeReference(id: string): void {
-  references.value = references.value.filter((item) => item.id !== id)
-  form.referenceIds = references.value.map((item) => item.id)
-}
-
-async function generate(): Promise<void> {
-  if (!settings.value.hasApiKey) {
-    generationFeedback.value = {
-      type: 'error',
-      title: '尚未配置 API Key',
-      message: '请先在连接设置中保存 API Key。'
-    }
-    settingsOpen.value = true
-    toast.info('请先配置 API Key。')
-    return
-  }
-  if (!canGenerate.value) return
-  generating.value = true
-  generationFeedback.value = {
-    type: 'info',
-    title: '请求已发送',
-    message: '正在等待图片接口返回结果，生成过程可能需要几分钟。'
-  }
-  try {
-    const result = await api.generate({ ...form, referenceIds: [...form.referenceIds] })
-    if (!result.success) {
-      generationFeedback.value = { type: 'error', title: '生成失败', message: result.message }
-      toast.error(result.message, { duration: 8000 })
-      return
-    }
-    const job = result.job
-    if (job.projectId === projectState.value.currentProjectId) {
-      history.value.unshift(job)
-      selectJob(job)
-    }
-    generationFeedback.value = {
-      type: 'success',
-      title: '生成完成',
-      message: `已收到 ${job.assets.length} 张图片并保存到本地历史。`
-    }
-    toast.success(
-      job.projectId === projectState.value.currentProjectId
-        ? job.status === 'partial'
-          ? '图片已部分生成。'
-          : '图片生成完成。'
-        : '图片生成完成，已保存到原项目。'
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '图片生成失败。'
-    generationFeedback.value = { type: 'error', title: '生成失败', message }
-    toast.error(message, { duration: 8000 })
-  } finally {
-    generating.value = false
-  }
-}
-
 function selectJob(job: GenerationJob | null): void {
   selectedJob.value = job
   selectedAsset.value = job?.assets[0] ?? null
 }
 
-function applyJobParameters(job: GenerationJob, keepReferences: boolean): void {
-  form.prompt = job.prompt
-  form.n = job.request.n
-  form.size = job.request.size
-  form.quality = job.request.quality
-  form.format = job.request.format
-  form.compression = job.request.compression
-  form.background = job.request.background
-  form.inputFidelity = job.request.inputFidelity
-  form.parentJobId = job.id
-  form.sourceAssetId = undefined
-  if (!keepReferences) {
-    references.value = []
-    form.referenceIds = []
-  }
-  pendingReuseJob.value = null
-  historyOpen.value = false
-  toast.success(
-    job.request.referenceCount
-      ? '提示词和输出参数已载入，请重新选择原参考图片。'
-      : '提示词和参数已载入。'
-  )
-}
-
-async function continueWithAsset(
-  asset: GeneratedAsset,
+function continueWithAsset(
+  _asset: GeneratedAsset,
   variant = false,
   sourceJob = selectedJob.value
-): Promise<void> {
+): void {
   if (!sourceJob) return
-  try {
-    const reference = await api.useAssetAsReference(asset.id)
-    references.value = [reference]
-    form.referenceIds = [reference.id]
-    form.parentJobId = sourceJob.id
-    form.sourceAssetId = asset.id
-    form.inputFidelity = variant ? 'low' : 'high'
-    form.prompt = sourceJob.prompt
-    selectJob(sourceJob)
-    previewOpen.value = false
-    historyOpen.value = false
-    flowOpen.value = false
-    toast.success(variant ? '已准备生成变体，可调整提示词后生成。' : '已加入创作链。')
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : '无法继续创作。')
-  }
-}
-
-function continueFromHistory(job: GenerationJob, variant: boolean): void {
-  const asset = job.assets[0]
-  if (asset) void continueWithAsset(asset, variant, job)
-}
-
-function openFlow(): void {
-  historyOpen.value = false
-  flowOpen.value = true
+  selectJob(sourceJob)
+  previewOpen.value = false
+  openFlowCreation(sourceJob, variant)
 }
 
 function selectFlowJob(job: GenerationJob): void {
@@ -622,76 +468,128 @@ function flowReferenceOrder(
 async function generateFromFlow(): Promise<void> {
   const creation = flowCreation.value
   const asset = creation?.job?.assets[0]
-  if (!creation || (creation.job && !asset) || !creation.prompt.trim() || flowGenerating.value)
-    return
+  if (!creation || (creation.job && !asset) || !creation.prompt.trim()) return
   if (!settings.value.hasApiKey) {
     settingsOpen.value = true
     toast.info('请先配置 API Key。')
     return
   }
 
-  const requestId = crypto.randomUUID()
+  const projectId = projectState.value.currentProjectId
   const prompt = creation.prompt.trim()
-  pendingFlowGeneration.value = {
-    id: requestId,
-    parentJobId: creation.job?.id,
-    prompt,
-    cancelling: false
-  }
+  const requestIds: string[] = Array.from({ length: creation.n }, () => crypto.randomUUID())
+  pendingFlowGenerations.value.push(
+    ...requestIds.map((id, index) => ({
+      id,
+      projectId,
+      parentJobId: creation.job?.id,
+      prompt,
+      branchIndex: index + 1,
+      branchCount: requestIds.length,
+      status: 'loading' as const,
+      cancelling: false
+    }))
+  )
   flowCreation.value = null
-  flowGenerating.value = true
   try {
     const leadingAssetReferences = await Promise.all(
       creation.leadingAssets.map((item) => api.useAssetAsReference(item.id))
     )
     const sourceReference = asset ? await api.useAssetAsReference(asset.id) : null
-    if (pendingFlowGeneration.value?.id !== requestId || pendingFlowGeneration.value.cancelling)
-      return
-    const result = await api.generate(
-      {
-        projectId: projectState.value.currentProjectId,
-        prompt,
-        referenceIds: [
-          ...leadingAssetReferences.map((item) => item.id),
-          ...creation.leadingReferences.map((item) => item.id),
-          ...(sourceReference ? [sourceReference.id] : []),
-          ...creation.references.map((item) => item.id)
-        ],
-        parentJobId: creation.job?.id,
-        sourceAssetId: asset?.id,
-        n: creation.n,
-        size: creation.size,
-        quality: creation.quality,
-        format: creation.job?.request.format ?? form.format,
-        compression: creation.job?.request.compression ?? form.compression,
-        background: creation.job?.request.background ?? form.background,
-        inputFidelity: creation.job ? (creation.variant ? 'low' : 'high') : form.inputFidelity
-      },
-      requestId
+    const referenceIds = [
+      ...leadingAssetReferences.map((item) => item.id),
+      ...creation.leadingReferences.map((item) => item.id),
+      ...(sourceReference ? [sourceReference.id] : []),
+      ...creation.references.map((item) => item.id)
+    ]
+    const results = await Promise.all(
+      requestIds.map(async (requestId) => {
+        const pending = pendingFlowGenerations.value.find((item) => item.id === requestId)
+        if (!pending) return false
+        if (pending.cancelling) {
+          pendingFlowGenerations.value = pendingFlowGenerations.value.filter(
+            (item) => item.id !== requestId
+          )
+          return false
+        }
+        try {
+          const result = await api.generate(
+            {
+              projectId,
+              prompt,
+              referenceIds,
+              parentJobId: creation.job?.id,
+              sourceAssetId: asset?.id,
+              n: 1,
+              size: creation.size,
+              quality: creation.quality,
+              format: creation.job?.request.format ?? form.format,
+              compression: creation.job?.request.compression ?? form.compression,
+              background: creation.job?.request.background ?? form.background,
+              inputFidelity: creation.job ? (creation.variant ? 'low' : 'high') : form.inputFidelity
+            },
+            requestId
+          )
+          const active = pendingFlowGenerations.value.find((item) => item.id === requestId)
+          if (!active) return false
+          if (active.cancelling) {
+            pendingFlowGenerations.value = pendingFlowGenerations.value.filter(
+              (item) => item.id !== requestId
+            )
+            return false
+          }
+          if (!result.success) {
+            active.status = 'error'
+            active.error = result.message
+            toast.error(`分支 ${active.branchIndex} 生成失败：${result.message}`, {
+              duration: 8000
+            })
+            return false
+          }
+          if (result.job.projectId === projectState.value.currentProjectId) {
+            history.value.unshift(result.job)
+            selectJob(result.job)
+          }
+          pendingFlowGenerations.value = pendingFlowGenerations.value.filter(
+            (item) => item.id !== requestId
+          )
+          return true
+        } catch (error) {
+          const active = pendingFlowGenerations.value.find((item) => item.id === requestId)
+          if (!active) return false
+          if (active.cancelling) {
+            pendingFlowGenerations.value = pendingFlowGenerations.value.filter(
+              (item) => item.id !== requestId
+            )
+          } else {
+            const message = error instanceof Error ? error.message : '图片生成失败。'
+            active.status = 'error'
+            active.error = message
+            toast.error(`分支 ${active.branchIndex} 生成失败：${message}`, { duration: 8000 })
+          }
+          return false
+        }
+      })
     )
-    if (pendingFlowGeneration.value?.id !== requestId || pendingFlowGeneration.value.cancelling)
-      return
-    if (!result.success) {
-      toast.error(result.message, { duration: 8000 })
-      return
-    }
-    if (result.job.projectId === projectState.value.currentProjectId) {
-      history.value.unshift(result.job)
-      selectJob(result.job)
-    }
-    toast.success(creation.variant ? '变体已加入创作流程。' : '新节点已加入创作流程。')
+    const completedCount = results.filter(Boolean).length
+    if (completedCount) toast.success(`已生成 ${completedCount} 个独立分支节点。`)
   } catch (error) {
-    if (!pendingFlowGeneration.value?.cancelling) {
-      toast.error(error instanceof Error ? error.message : '流程节点生成失败。', { duration: 8000 })
+    const message = error instanceof Error ? error.message : '分支节点生成失败。'
+    for (const generation of pendingFlowGenerations.value.filter((item) =>
+      requestIds.includes(item.id)
+    )) {
+      if (generation.cancelling) removeFlowGeneration(generation.id)
+      else {
+        generation.status = 'error'
+        generation.error = message
+      }
     }
-  } finally {
-    if (pendingFlowGeneration.value?.id === requestId) pendingFlowGeneration.value = null
-    flowGenerating.value = false
+    toast.error(message, { duration: 8000 })
   }
 }
 
-async function cancelFlowGeneration(): Promise<void> {
-  const generation = pendingFlowGeneration.value
+async function cancelFlowGeneration(requestId: string): Promise<void> {
+  const generation = pendingFlowGenerations.value.find((item) => item.id === requestId)
   if (!generation || generation.cancelling) return
   generation.cancelling = true
   try {
@@ -701,6 +599,12 @@ async function cancelFlowGeneration(): Promise<void> {
     generation.cancelling = false
     toast.error(error instanceof Error ? error.message : '无法中断节点生成。')
   }
+}
+
+function removeFlowGeneration(requestId: string): void {
+  pendingFlowGenerations.value = pendingFlowGenerations.value.filter(
+    (generation) => generation.id !== requestId
+  )
 }
 
 async function toggleFavorite(asset: GeneratedAsset): Promise<void> {
@@ -719,45 +623,12 @@ async function toggleFavorite(asset: GeneratedAsset): Promise<void> {
   }
 }
 
-async function saveAssets(assets: GeneratedAsset[]): Promise<void> {
-  try {
-    const result = await api.saveAssets(assets.map((asset) => asset.id))
-    if (result.message) result.success ? toast.success(result.message) : toast.info(result.message)
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : '批量导出失败。')
-  }
-}
-
-async function copyPrompt(): Promise<void> {
-  if (!selectedJob.value) return
-  try {
-    await navigator.clipboard.writeText(selectedJob.value.prompt)
-    toast.success('提示词已复制。')
-  } catch {
-    toast.error('提示词复制失败。')
-  }
-}
-
-function resetParameters(): void {
-  form.n = 1
-  form.size = '1024x1024'
-  form.quality = 'auto'
-  form.format = 'png'
-  form.compression = 90
-  form.background = 'auto'
-  form.inputFidelity = 'low'
-  toast.success('输出参数已重置。')
-}
-
-function openPromptLibrary(target: 'main' | 'flow'): void {
-  promptTarget.value = target
+function openPromptLibrary(): void {
   promptsOpen.value = true
 }
 
 function fillPrompt(prompt: PromptTemplate): void {
-  if (promptTarget.value === 'flow' && flowCreation.value)
-    flowCreation.value.prompt = prompt.content
-  else form.prompt = prompt.content
+  if (flowCreation.value) flowCreation.value.prompt = prompt.content
   promptsOpen.value = false
   toast.success(`已填入“${prompt.title}”。`)
 }
@@ -789,14 +660,6 @@ async function deletePrompt(id: string): Promise<void> {
   }
 }
 
-function reuseJob(job: GenerationJob): void {
-  if (references.value.length || job.request.referenceCount) {
-    pendingReuseJob.value = job
-    return
-  }
-  applyJobParameters(job, false)
-}
-
 async function deleteJob(): Promise<void> {
   const job = pendingDeleteJob.value
   if (!job) return
@@ -812,11 +675,6 @@ async function deleteJob(): Promise<void> {
   } finally {
     deleting.value = false
   }
-}
-
-function selectHistoryJob(job: GenerationJob): void {
-  selectJob(job)
-  historyOpen.value = false
 }
 
 async function saveAsset(asset: GeneratedAsset): Promise<void> {
@@ -922,15 +780,13 @@ onMounted(load)
 
 <template>
   <GenerationFlow
-    v-if="flowOpen"
     :history="history"
     :projects="projectState.projects"
     :current-project-id="projectState.currentProjectId"
     :selected-job-id="selectedJob?.id"
     :project-busy="projectBusy || changingProject"
     :background-image-url="backgroundImageUrl"
-    :pending-generation="pendingFlowGeneration ?? undefined"
-    @close="flowOpen = false"
+    :pending-generations="currentPendingFlowGenerations"
     @select="selectFlowJob"
     @preview="previewFlowJob"
     @create="openFlowCreation"
@@ -939,497 +795,9 @@ onMounted(load)
     @manage-projects="projectsOpen = true"
     @delete="pendingDeleteJob = $event"
     @cancel-generation="cancelFlowGeneration"
+    @remove-generation="removeFlowGeneration"
     @open-settings="settingsOpen = true"
   />
-  <div
-    v-else
-    class="window-background flex h-screen flex-col bg-background"
-    :class="backgroundImageUrl && 'has-custom-background'"
-    :style="
-      backgroundImageUrl ? { '--window-background-image': `url('${backgroundImageUrl}')` } : {}
-    "
-  >
-    <header
-      :class="[
-        'relative z-10 flex h-14 shrink-0 items-center border-b bg-card/70 backdrop-blur-xl [-webkit-app-region:drag]',
-        isMac ? 'pl-24' : 'pl-4'
-      ]"
-    >
-      <div class="flex items-center gap-3">
-        <div
-          class="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15"
-        >
-          <WandSparklesIcon />
-        </div>
-        <div class="hidden sm:block">
-          <h1 class="text-sm font-semibold tracking-tight">Image Deck</h1>
-        </div>
-      </div>
-      <div
-        :class="[
-          'ml-auto flex h-full items-center gap-2 [-webkit-app-region:no-drag]',
-          isMac && 'pr-3'
-        ]"
-      >
-        <Select
-          :model-value="projectState.currentProjectId"
-          :disabled="changingProject || projectBusy"
-          @update:model-value="switchProject"
-        >
-          <SelectTrigger class="w-32 sm:w-40" aria-label="当前项目">
-            <FolderIcon />
-            <SelectValue placeholder="选择项目" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem
-                v-for="project in projectState.projects"
-                :key="project.id"
-                :value="project.id"
-              >
-                {{ project.name }}
-              </SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="管理项目"
-          :disabled="projectBusy"
-          @click="projectsOpen = true"
-        >
-          <PlusIcon />
-        </Button>
-        <Button variant="secondary" size="sm" aria-label="切换到流程创造模式" @click="openFlow">
-          <GitBranchIcon data-icon="inline-start" />流程模式
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="xl:hidden"
-          aria-label="打开历史记录"
-          @click="historyOpen = true"
-        >
-          <HistoryIcon data-icon="inline-start" />历史
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="连接设置" @click="settingsOpen = true">
-          <Settings2Icon />
-        </Button>
-        <WindowControls :class="!isMac && 'ml-1'" />
-      </div>
-    </header>
-
-    <main
-      class="relative z-10 grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_280px] max-xl:grid-cols-[300px_minmax(0,1fr)]"
-    >
-      <aside class="flex min-h-0 flex-col border-r bg-card/35">
-        <ScrollArea class="min-h-0 flex-1">
-          <div class="flex flex-col gap-6 p-4">
-            <div>
-              <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary">Create</p>
-              <h2 class="mt-1 text-xl font-semibold tracking-tight">构建你的画面</h2>
-            </div>
-
-            <FieldGroup>
-              <Field>
-                <div class="flex items-center justify-between">
-                  <FieldLabel for="prompt">提示词</FieldLabel>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    type="button"
-                    @click="openPromptLibrary('main')"
-                  >
-                    <BookOpenIcon data-icon="inline-start" />提示词库
-                  </Button>
-                </div>
-                <Textarea
-                  id="prompt"
-                  v-model="form.prompt"
-                  class="min-h-36 resize-none"
-                  placeholder="一张电影感的产品照片，柔和侧光，深色背景，精致材质细节……"
-                  :aria-invalid="!form.prompt.trim() && form.prompt.length > 0"
-                />
-                <FieldDescription class="flex justify-end">
-                  <span>{{ form.prompt.length }}/32000</span>
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <div class="flex items-center justify-between">
-                  <FieldLabel>参考图片</FieldLabel>
-                  <span class="text-xs text-muted-foreground">{{ references.length }}/16</span>
-                </div>
-                <button
-                  type="button"
-                  class="flex min-h-24 w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-muted/20 text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground"
-                  @click="pickReferences"
-                >
-                  <UploadCloudIcon class="size-5" />
-                  <span class="text-xs font-medium">选择 PNG、JPG 或 WebP</span>
-                </button>
-                <div v-if="references.length" class="grid grid-cols-4 gap-2">
-                  <div
-                    v-for="image in references"
-                    :key="image.id"
-                    class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
-                  >
-                    <img :src="image.url" :alt="image.name" class="size-full object-cover" />
-                    <Button
-                      variant="destructive"
-                      size="icon-xs"
-                      class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
-                      aria-label="移除参考图"
-                      @click="removeReference(image.id)"
-                    >
-                      <XIcon />
-                    </Button>
-                  </div>
-                  <button
-                    v-if="references.length < 16"
-                    type="button"
-                    class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:text-foreground"
-                    @click="pickReferences"
-                  >
-                    <PlusIcon class="size-4" />
-                  </button>
-                </div>
-              </Field>
-
-              <Field>
-                <div class="flex items-center justify-between">
-                  <FieldLabel>画幅</FieldLabel>
-                  <Button variant="ghost" size="xs" type="button" @click="resetParameters">
-                    <RotateCcwIcon data-icon="inline-start" />重置参数
-                  </Button>
-                </div>
-                <ToggleGroup
-                  v-model="form.size"
-                  type="single"
-                  variant="outline"
-                  class="grid grid-cols-3"
-                >
-                  <ToggleGroupItem value="1024x1024">1:1</ToggleGroupItem>
-                  <ToggleGroupItem value="1536x1024">3:2</ToggleGroupItem>
-                  <ToggleGroupItem value="1024x1536">2:3</ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-
-              <div class="grid grid-cols-2 gap-3">
-                <Field>
-                  <FieldLabel>质量</FieldLabel>
-                  <Select v-model="form.quality">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="auto">自动</SelectItem>
-                        <SelectItem value="low">低</SelectItem>
-                        <SelectItem value="medium">中</SelectItem>
-                        <SelectItem value="high">高</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel>格式</FieldLabel>
-                  <Select v-model="form.format">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="png">PNG</SelectItem>
-                        <SelectItem value="jpeg">JPEG</SelectItem>
-                        <SelectItem value="webp">WebP</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <Field>
-                  <FieldLabel>背景</FieldLabel>
-                  <Select v-model="form.background">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="auto">自动</SelectItem>
-                        <SelectItem value="opaque">不透明</SelectItem>
-                        <SelectItem value="transparent" :disabled="form.format === 'jpeg'"
-                          >透明</SelectItem
-                        >
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel>数量</FieldLabel>
-                  <Select v-model="form.n">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem v-for="count in 4" :key="count" :value="count"
-                          >{{ count }} 张</SelectItem
-                        >
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-
-              <Field v-if="form.format !== 'png'">
-                <div class="flex items-center justify-between">
-                  <FieldLabel>输出压缩</FieldLabel>
-                  <span class="text-xs text-muted-foreground">{{ form.compression }}%</span>
-                </div>
-                <Slider v-model="compressionSlider" :min="0" :max="100" :step="5" />
-              </Field>
-
-              <Field v-if="references.length">
-                <FieldLabel>参考保真度</FieldLabel>
-                <ToggleGroup
-                  v-model="form.inputFidelity"
-                  type="single"
-                  variant="outline"
-                  class="grid grid-cols-2"
-                >
-                  <ToggleGroupItem value="low">灵活创作</ToggleGroupItem>
-                  <ToggleGroupItem value="high">高度还原</ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-            </FieldGroup>
-
-            <Alert
-              v-if="generationFeedback"
-              :variant="generationFeedback.type === 'error' ? 'destructive' : 'default'"
-            >
-              <CircleAlertIcon v-if="generationFeedback.type === 'error'" />
-              <CircleCheckIcon v-else-if="generationFeedback.type === 'success'" />
-              <InfoIcon v-else />
-              <AlertTitle>{{ generationFeedback.title }}</AlertTitle>
-              <AlertDescription>{{ generationFeedback.message }}</AlertDescription>
-            </Alert>
-          </div>
-        </ScrollArea>
-        <div class="shrink-0 border-t bg-card/90 p-4 backdrop-blur-xl">
-          <Button size="lg" class="w-full" :disabled="!canGenerate" @click="generate">
-            <LoaderCircleIcon v-if="generating" data-icon="inline-start" class="animate-spin" />
-            <SparklesIcon v-else data-icon="inline-start" />
-            {{ generating ? '正在生成…' : references.length ? '编辑图片' : '生成图片' }}
-          </Button>
-        </div>
-      </aside>
-
-      <section
-        class="relative min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top,var(--color-muted),transparent_45%)]"
-      >
-        <div
-          class="absolute inset-0 opacity-[0.035] [background-image:linear-gradient(var(--foreground)_1px,transparent_1px),linear-gradient(90deg,var(--foreground)_1px,transparent_1px)] [background-size:32px_32px]"
-        />
-        <ScrollArea class="relative h-full">
-          <div class="flex min-h-[calc(100vh-3.5rem)] flex-col p-6 lg:p-10">
-            <div
-              v-if="generating && !currentAssets.length"
-              class="m-auto grid w-full max-w-3xl grid-cols-2 gap-4"
-            >
-              <Skeleton v-for="index in form.n" :key="index" class="aspect-square rounded-2xl" />
-              <div class="col-span-full mt-3 text-center">
-                <p class="text-sm font-medium">正在构建画面</p>
-              </div>
-            </div>
-
-            <Empty v-else-if="!currentAssets.length" class="m-auto max-w-md border-none">
-              <EmptyHeader>
-                <EmptyMedia variant="icon"><ImageIcon /></EmptyMedia>
-                <EmptyTitle>从一个想法开始</EmptyTitle>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button
-                  variant="outline"
-                  @click="
-                    form.prompt = '一座悬浮在晨雾中的未来图书馆，建筑摄影，柔和自然光，超精细细节'
-                  "
-                >
-                  <SparklesIcon data-icon="inline-start" />使用示例提示词
-                </Button>
-              </EmptyContent>
-            </Empty>
-
-            <div v-else class="m-auto w-full max-w-5xl">
-              <Alert v-if="generating" class="mb-5">
-                <LoaderCircleIcon class="animate-spin" />
-                <AlertTitle>正在生成新作品</AlertTitle>
-                <AlertDescription>
-                  当前作品仍可预览和保存，新结果返回后会自动切换。
-                </AlertDescription>
-              </Alert>
-              <div class="mb-5 flex items-end justify-between gap-4">
-                <div class="min-w-0">
-                  <div class="mb-2 flex items-center gap-2">
-                    <Badge variant="secondary">{{ selectedJob?.assets.length }} 张图片</Badge>
-                    <Badge v-if="selectedJob?.parentJobId" variant="outline" class="gap-1">
-                      <GitBranchIcon class="size-3" />衍生版本
-                    </Badge>
-                    <span class="text-xs text-muted-foreground">{{
-                      selectedJob && formatDate(selectedJob.createdAt)
-                    }}</span>
-                  </div>
-                  <p class="line-clamp-2 max-w-2xl text-sm text-muted-foreground">
-                    {{ selectedJob?.prompt }}
-                  </p>
-                </div>
-                <div class="flex shrink-0 flex-wrap justify-end gap-2">
-                  <Button variant="outline" size="sm" @click="copyPrompt">
-                    <CopyIcon data-icon="inline-start" />复制提示词
-                  </Button>
-                  <Button
-                    v-if="favoriteAssets.length"
-                    variant="outline"
-                    size="sm"
-                    @click="saveAssets(favoriteAssets)"
-                  >
-                    <HeartIcon data-icon="inline-start" />导出收藏
-                  </Button>
-                  <Button variant="outline" size="sm" @click="saveAssets(currentAssets)">
-                    <ImagesIcon data-icon="inline-start" />批量导出
-                  </Button>
-                  <Button variant="outline" size="sm" @click="selectedJob && reuseJob(selectedJob)">
-                    <RotateCcwIcon data-icon="inline-start" />复用参数
-                  </Button>
-                </div>
-              </div>
-              <div
-                :class="[
-                  'grid gap-4',
-                  currentAssets.length === 1
-                    ? 'h-[calc(100dvh-15rem)] min-h-80 grid-cols-1'
-                    : 'grid-cols-2'
-                ]"
-              >
-                <Card
-                  v-for="asset in currentAssets"
-                  :key="asset.id"
-                  :class="[
-                    'group overflow-hidden rounded-xl bg-card/70 py-0 backdrop-blur-xl',
-                    currentAssets.length === 1 && 'flex h-full min-h-0 flex-col'
-                  ]"
-                >
-                  <button
-                    :class="[
-                      'relative block w-full overflow-hidden bg-muted',
-                      currentAssets.length === 1 ? 'min-h-0 flex-1' : 'aspect-square'
-                    ]"
-                    @click="openPreview(asset)"
-                  >
-                    <img
-                      :src="asset.url"
-                      :alt="asset.name"
-                      class="size-full object-contain transition-transform duration-500 group-hover:scale-[1.02]"
-                      draggable="false"
-                    />
-                    <div
-                      class="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-between bg-background/80 p-3 backdrop-blur-md transition-transform group-hover:translate-y-0"
-                    >
-                      <span class="text-xs text-muted-foreground">{{
-                        formatBytes(asset.size)
-                      }}</span>
-                      <span class="text-xs font-medium">点击预览</span>
-                    </div>
-                  </button>
-                  <div class="flex items-center justify-between p-3">
-                    <span class="truncate text-xs text-muted-foreground">{{ asset.name }}</span>
-                    <div class="flex items-center gap-1">
-                      <Button
-                        :variant="asset.favorite ? 'secondary' : 'ghost'"
-                        size="icon-sm"
-                        :aria-label="asset.favorite ? '取消收藏' : '收藏图片'"
-                        @click="toggleFavorite(asset)"
-                      >
-                        <HeartIcon :class="asset.favorite && 'fill-current'" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="基于图片继续创作"
-                        @click="continueWithAsset(asset)"
-                      >
-                        <GitBranchIcon />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="保存图片"
-                        @click="saveAsset(asset)"
-                        ><DownloadIcon
-                      /></Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="在文件夹中显示"
-                        @click="api.showAsset(asset.id)"
-                        ><FolderOpenIcon
-                      /></Button>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            </div>
-          </div>
-        </ScrollArea>
-      </section>
-
-      <aside class="min-h-0 border-l bg-card/35 max-xl:hidden">
-        <HistoryPanel
-          :history="history"
-          :selected-job-id="selectedJob?.id"
-          @select="selectHistoryJob"
-          @reuse="reuseJob"
-          @delete="pendingDeleteJob = $event"
-          @continue="continueFromHistory"
-          @open-flow="openFlow"
-        />
-      </aside>
-    </main>
-  </div>
-
-  <Sheet v-model:open="historyOpen">
-    <SheetContent class="gap-0 p-0" side="right">
-      <SheetHeader class="sr-only">
-        <SheetTitle>历史记录</SheetTitle>
-      </SheetHeader>
-      <HistoryPanel
-        :history="history"
-        :selected-job-id="selectedJob?.id"
-        @select="selectHistoryJob"
-        @reuse="reuseJob"
-        @delete="pendingDeleteJob = $event"
-        @continue="continueFromHistory"
-        @open-flow="openFlow"
-      />
-    </SheetContent>
-  </Sheet>
-
-  <Dialog :open="Boolean(pendingReuseJob)" @update:open="!$event && (pendingReuseJob = null)">
-    <DialogContent :show-close-button="false">
-      <DialogHeader>
-        <DialogTitle>复用这次创作？</DialogTitle>
-      </DialogHeader>
-      <DialogFooter>
-        <Button variant="outline" @click="pendingReuseJob = null">取消</Button>
-        <Button
-          v-if="pendingReuseJob && references.length"
-          variant="secondary"
-          @click="applyJobParameters(pendingReuseJob, true)"
-        >
-          保留当前参考图
-        </Button>
-        <Button v-if="pendingReuseJob" @click="applyJobParameters(pendingReuseJob, false)">
-          清空参考图并载入
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
   <Dialog :open="Boolean(pendingDeleteJob)" @update:open="!$event && (pendingDeleteJob = null)">
     <DialogContent :show-close-button="false">
       <DialogHeader>
@@ -1567,14 +935,8 @@ onMounted(load)
     </DialogContent>
   </Dialog>
 
-  <Dialog
-    :open="Boolean(flowCreation)"
-    @update:open="!$event && !flowGenerating && (flowCreation = null)"
-  >
-    <DialogContent
-      class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
-      :show-close-button="!flowGenerating"
-    >
+  <Dialog :open="Boolean(flowCreation)" @update:open="!$event && (flowCreation = null)">
+    <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
       <DialogHeader>
         <DialogTitle>
           {{
@@ -1608,13 +970,7 @@ onMounted(load)
           <Field>
             <div class="flex items-center justify-between">
               <FieldLabel for="flow-prompt">提示词</FieldLabel>
-              <Button
-                variant="ghost"
-                size="xs"
-                type="button"
-                :disabled="flowGenerating"
-                @click="openPromptLibrary('flow')"
-              >
+              <Button variant="ghost" size="xs" type="button" @click="openPromptLibrary">
                 <BookOpenIcon data-icon="inline-start" />提示词库
               </Button>
             </div>
@@ -1625,7 +981,6 @@ onMounted(load)
               :placeholder="
                 flowCreation.job ? '描述希望基于当前节点继续生成的画面……' : '描述希望创建的画面……'
               "
-              :disabled="flowGenerating"
             />
             <FieldDescription class="flex justify-end">
               <span>{{ flowCreation.prompt.length }}/32000</span>
@@ -1644,7 +999,6 @@ onMounted(load)
                     ? 'border-primary ring-2 ring-primary/30'
                     : 'hover:border-primary/50'
                 ]"
-                :disabled="flowGenerating"
                 :aria-pressed="isLeadingAssetSelected(asset)"
                 @click="toggleLeadingAsset(asset)"
               >
@@ -1676,7 +1030,6 @@ onMounted(load)
                   variant="destructive"
                   size="icon-xs"
                   class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
-                  :disabled="flowGenerating"
                   aria-label="移除当前节点前的参考图"
                   @click="removeFlowReference(image.id, 'before')"
                 >
@@ -1692,7 +1045,6 @@ onMounted(load)
                 "
                 type="button"
                 class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                :disabled="flowGenerating"
                 aria-label="上传当前节点前的参考图片"
                 @click="pickFlowReferences('before')"
               >
@@ -1741,7 +1093,6 @@ onMounted(load)
                   variant="destructive"
                   size="icon-xs"
                   class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
-                  :disabled="flowGenerating"
                   aria-label="移除参考图"
                   @click="removeFlowReference(image.id)"
                 >
@@ -1757,7 +1108,6 @@ onMounted(load)
                 "
                 type="button"
                 class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                :disabled="flowGenerating"
                 aria-label="继续上传参考图片"
                 @click="pickFlowReferences('after')"
               >
@@ -1768,7 +1118,7 @@ onMounted(load)
           <div class="grid grid-cols-3 gap-3">
             <Field>
               <FieldLabel>画幅</FieldLabel>
-              <Select v-model="flowCreation.size" :disabled="flowGenerating">
+              <Select v-model="flowCreation.size">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -1781,7 +1131,7 @@ onMounted(load)
             </Field>
             <Field>
               <FieldLabel>质量</FieldLabel>
-              <Select v-model="flowCreation.quality" :disabled="flowGenerating">
+              <Select v-model="flowCreation.quality">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -1794,13 +1144,13 @@ onMounted(load)
               </Select>
             </Field>
             <Field>
-              <FieldLabel>数量</FieldLabel>
-              <Select v-model="flowCreation.n" :disabled="flowGenerating">
+              <FieldLabel>分支数量</FieldLabel>
+              <Select v-model="flowCreation.n">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
                     <SelectItem v-for="count in 4" :key="count" :value="count">
-                      {{ count }} 张
+                      {{ count }} 个分支
                     </SelectItem>
                   </SelectGroup>
                 </SelectContent>
@@ -1810,16 +1160,10 @@ onMounted(load)
         </FieldGroup>
       </div>
       <DialogFooter>
-        <Button variant="outline" :disabled="flowGenerating" @click="flowCreation = null">
-          取消
-        </Button>
-        <Button
-          :disabled="!flowCreation?.prompt.trim() || flowGenerating"
-          @click="generateFromFlow"
-        >
-          <LoaderCircleIcon v-if="flowGenerating" data-icon="inline-start" class="animate-spin" />
-          <SparklesIcon v-else data-icon="inline-start" />
-          {{ flowGenerating ? '正在生成…' : '生成并加入流程' }}
+        <Button variant="outline" @click="flowCreation = null"> 取消 </Button>
+        <Button :disabled="!flowCreation?.prompt.trim()" @click="generateFromFlow">
+          <SparklesIcon data-icon="inline-start" />
+          生成并加入画布
         </Button>
       </DialogFooter>
     </DialogContent>

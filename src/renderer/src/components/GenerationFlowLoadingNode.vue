@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 export interface GenerationFlowLoadingNodeData {
   prompt: string
   hasParent: boolean
+  branchLabel?: string
   cancelling: boolean
   onCancel: () => void
 }
@@ -27,7 +28,10 @@ defineProps<{
       </div>
       <div class="min-w-0 flex-1">
         <div class="mb-1.5 flex items-center gap-1.5">
-          <Badge variant="secondary">{{ data.cancelling ? '正在中断' : '正在生成' }}</Badge>
+          <Badge variant="secondary">
+            {{ data.branchLabel ? `${data.branchLabel} · ` : ''
+            }}{{ data.cancelling ? '正在中断' : '正在生成' }}
+          </Badge>
         </div>
         <p class="line-clamp-3 text-xs font-medium leading-5">{{ data.prompt }}</p>
       </div>
