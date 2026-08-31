@@ -80,7 +80,8 @@ export async function persistGeneratedAsset(
   const directory = dataPath('assets', jobId)
   await ensureDirectory(directory)
   const id = randomUUID()
-  const name = `image-${index + 1}.${format === 'jpeg' ? 'jpg' : format}`
+  const timestamp = Date.now()
+  const name = `image-${timestamp}${index ? `-${index + 1}` : ''}.${format === 'jpeg' ? 'jpg' : format}`
   const path = join(directory, name)
   const bytes = Buffer.from(encoded, 'base64')
   if (!bytes.length) throw new Error('接口返回了空图片。')
