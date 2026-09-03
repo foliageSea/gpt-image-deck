@@ -12,12 +12,18 @@ import { getStoredSettings, normalizeSettings } from './settings-store'
 import {
   deleteJobAssets,
   getReferences,
+  persistJobReferences,
   persistGeneratedAsset,
   persistGeneratedBytes
 } from './asset-store'
 import { addHistory } from './history-store'
 
 const validSizes = new Set(['auto', '1024x1024', '1536x1024', '1024x1536'])
+const validQualities = new Set(['auto', 'low', 'medium', 'high'])
+const validFormats = new Set(['png', 'jpeg', 'webp'])
+const validBackgrounds = new Set(['auto', 'opaque', 'transparent'])
+const validFidelities = new Set(['low', 'high'])
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function validate(request: GenerationRequest): void {
   if (!request.projectId) throw new Error('请先选择项目。')
@@ -28,10 +34,37 @@ function validate(request: GenerationRequest): void {
   if (!validSizes.has(request.size) && !/^\d{2,4}x\d{2,4}$/.test(request.size)) {
     throw new Error('图片尺寸无效。')
   }
+  if (
+    !validQualities.has(request.quality) ||
+    !validFormats.has(request.format) ||
+    !validBackgrounds.has(request.background) ||
+    !validFidelities.has(request.inputFidelity)
+  ) {
+    throw new Error('图片生成参数无效。')
+  }
   if (request.background === 'transparent' && request.format === 'jpeg') {
     throw new Error('透明背景仅支持 PNG 或 WebP。')
   }
-  if (request.compression < 0 || request.compression > 100) throw new Error('压缩率应为 0 到 100。')
+  if (
+    !Number.isInteger(request.compression) ||
+    request.compression < 0 ||
+    request.compression > 100
+  ) {
+    throw new Error('压缩率应为 0 到 100 的整数。')
+  }
+  if (
+    !Array.isArray(request.referenceIds) ||
+    !Array.isArray(request.referenceAssetIds) ||
+    request.referenceIds.length !== request.referenceAssetIds.length ||
+    request.referenceIds.length > 16 ||
+    request.referenceIds.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id)) ||
+    new Set(request.referenceIds).size !== request.referenceIds.length ||
+    request.referenceAssetIds.some(
+      (id) => id !== null && (typeof id !== 'string' || !UUID_PATTERN.test(id))
+    )
+  ) {
+    throw new Error('参考图片信息无效。')
+  }
 }
 
 function mapError(error: unknown): string {
@@ -133,14 +166,14 @@ export async function generateImage(
           toFile(createReadStream(reference.path), reference.name, { type: reference.mimeType })
         )
       )
-      response = await client.images.edit(
-        {
-          ...common,
-          image: files,
-          input_fidelity: request.inputFidelity
-        },
-        { signal }
-      )
+      const editRequest = {
+        ...common,
+        image: files,
+        ...(settings.model.startsWith('gpt-image-2')
+          ? {}
+          : { input_fidelity: request.inputFidelity })
+      }
+      response = await client.images.edit(editRequest, { signal })
     } else {
       response = await client.images.generate(common, { signal })
     }
@@ -185,7 +218,22 @@ export async function generateImage(
           outputTokens: rawUsage.output_tokens
         }
       : undefined
-    const { projectId, referenceIds, parentJobId, sourceAssetId, ...generationOptions } = request
+    const references = await persistJobReferences(
+      id,
+      request.referenceIds,
+      request.referenceAssetIds
+    )
+    const { projectId, referenceIds, parentJobId, sourceAssetId } = request
+    const generationOptions = {
+      prompt: request.prompt,
+      n: request.n,
+      size: request.size,
+      quality: request.quality,
+      format: request.format,
+      compression: request.compression,
+      background: request.background,
+      inputFidelity: request.inputFidelity
+    }
     const job: GenerationJob = {
       id,
       projectId,
@@ -194,8 +242,10 @@ export async function generateImage(
       prompt: request.prompt.trim(),
       parentJobId,
       sourceAssetId,
+      model: settings.model,
       request: { ...generationOptions, referenceCount: referenceIds.length },
       assets,
+      references,
       usage
     }
     try {

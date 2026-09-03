@@ -5,6 +5,7 @@ import type {
   ProjectState
 } from '../../../shared/image-types'
 import type { FlowCreation, PendingFlowGeneration } from '@/types/app'
+import type { GeneratedAsset } from '../../../shared/image-types'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
@@ -23,7 +24,7 @@ export type GenerationFlowController = {
   flowCreation: Ref<FlowCreation | null>
   currentPendingGenerations: ComputedRef<PendingFlowGeneration[]>
   generating: ComputedRef<boolean>
-  openCreation: (job: GenerationJob, variant: boolean) => void
+  openCreation: (job: GenerationJob, variant: boolean, asset?: GeneratedAsset) => void
   openRootCreation: () => void
   generate: () => Promise<void>
   cancelGeneration: (requestId: string) => Promise<void>
@@ -59,17 +60,23 @@ export function useGenerationFlow(options: GenerationFlowOptions): GenerationFlo
     }
   )
 
-  function openCreation(job: GenerationJob, variant: boolean): void {
+  function openCreation(
+    job: GenerationJob,
+    variant: boolean,
+    asset: GeneratedAsset | undefined = job.assets[0]
+  ): void {
     flowCreation.value = {
       job,
       variant,
       prompt: job.prompt,
       size: job.request.size,
       quality: job.request.quality,
-      n: job.request.n,
-      leadingAssets: [],
-      leadingReferences: [],
-      references: []
+      n: options.form.n,
+      format: job.request.format,
+      compression: job.request.compression,
+      background: job.request.background,
+      inputFidelity: variant ? 'low' : 'high',
+      references: asset ? [{ ...asset, kind: 'asset', assetId: asset.id, primary: true }] : []
     }
   }
 
@@ -80,16 +87,17 @@ export function useGenerationFlow(options: GenerationFlowOptions): GenerationFlo
       size: options.form.size,
       quality: options.form.quality,
       n: options.form.n,
-      leadingAssets: [],
-      leadingReferences: [],
+      format: options.form.format,
+      compression: options.form.compression,
+      background: options.form.background,
+      inputFidelity: options.form.inputFidelity,
       references: []
     }
   }
 
   async function generate(): Promise<void> {
     const creation = flowCreation.value
-    const asset = creation?.job?.assets[0]
-    if (!creation || (creation.job && !asset) || !creation.prompt.trim()) return
+    if (!creation || !creation.prompt.trim()) return
     if (!options.settings.value.hasApiKey) {
       options.openSettings()
       toast.info('请先配置 API Key。')
@@ -98,6 +106,15 @@ export function useGenerationFlow(options: GenerationFlowOptions): GenerationFlo
 
     const projectId = options.projectState.value.currentProjectId
     const prompt = creation.prompt.trim()
+    Object.assign(options.form, {
+      size: creation.size,
+      quality: creation.quality,
+      n: creation.n,
+      format: creation.format,
+      compression: creation.compression,
+      background: creation.background,
+      inputFidelity: creation.inputFidelity
+    })
     const requestIds: string[] = Array.from({ length: creation.n }, () => crypto.randomUUID())
     options.pendingGenerations.value.push(
       ...requestIds.map((id, index) => ({
@@ -113,16 +130,14 @@ export function useGenerationFlow(options: GenerationFlowOptions): GenerationFlo
     )
     flowCreation.value = null
     try {
-      const leadingAssetReferences = await Promise.all(
-        creation.leadingAssets.map((item) => api.useAssetAsReference(item.id))
+      const resolvedReferences = await Promise.all(
+        creation.references.map(async (item) =>
+          item.kind === 'asset' && item.assetId ? await api.useAssetAsReference(item.assetId) : item
+        )
       )
-      const sourceReference = asset ? await api.useAssetAsReference(asset.id) : null
-      const referenceIds = [
-        ...leadingAssetReferences.map((item) => item.id),
-        ...creation.leadingReferences.map((item) => item.id),
-        ...(sourceReference ? [sourceReference.id] : []),
-        ...creation.references.map((item) => item.id)
-      ]
+      const referenceIds = resolvedReferences.map((item) => item.id)
+      const referenceAssetIds = creation.references.map((item) => item.assetId ?? null)
+      const sourceAssetId = creation.references.find((item) => item.primary)?.assetId
       const results = await Promise.all(
         requestIds.map(async (requestId) => {
           const pending = options.pendingGenerations.value.find((item) => item.id === requestId)
@@ -137,19 +152,16 @@ export function useGenerationFlow(options: GenerationFlowOptions): GenerationFlo
                 projectId,
                 prompt,
                 referenceIds,
+                referenceAssetIds,
                 parentJobId: creation.job?.id,
-                sourceAssetId: asset?.id,
+                sourceAssetId,
                 n: 1,
                 size: creation.size,
                 quality: creation.quality,
-                format: creation.job?.request.format ?? options.form.format,
-                compression: creation.job?.request.compression ?? options.form.compression,
-                background: creation.job?.request.background ?? options.form.background,
-                inputFidelity: creation.job
-                  ? creation.variant
-                    ? 'low'
-                    : 'high'
-                  : options.form.inputFidelity
+                format: creation.format,
+                compression: creation.compression,
+                background: creation.background,
+                inputFidelity: creation.inputFidelity
               },
               requestId
             )

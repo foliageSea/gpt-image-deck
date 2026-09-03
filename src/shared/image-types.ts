@@ -16,6 +16,7 @@ export interface GenerationRequest {
   projectId: string
   prompt: string
   referenceIds: string[]
+  referenceAssetIds: Array<string | null>
   parentJobId?: string
   sourceAssetId?: string
   n: number
@@ -25,6 +26,11 @@ export interface GenerationRequest {
   compression: number
   background: ImageBackground
   inputFidelity: InputFidelity
+}
+
+export interface StoredReferenceImage extends ReferenceImage {
+  originalName: string
+  sourceAssetId?: string
 }
 
 export interface GeneratedAsset {
@@ -50,13 +56,15 @@ export interface GenerationJob {
   prompt: string
   parentJobId?: string
   sourceAssetId?: string
+  model?: string
   request: Omit<
     GenerationRequest,
-    'projectId' | 'referenceIds' | 'parentJobId' | 'sourceAssetId'
+    'projectId' | 'referenceIds' | 'referenceAssetIds' | 'parentJobId' | 'sourceAssetId'
   > & {
     referenceCount: number
   }
   assets: GeneratedAsset[]
+  references?: StoredReferenceImage[]
   usage?: TokenUsage
   error?: string
 }

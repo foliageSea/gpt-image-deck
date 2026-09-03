@@ -1,4 +1,4 @@
-import type { GenerationJob, Project } from '../../shared/image-types'
+import type { GenerationJob, Project, StoredReferenceImage } from '../../shared/image-types'
 import { randomUUID } from 'node:crypto'
 
 export const PROJECT_ARCHIVE_KIND = 'gpt-image-deck-project'
@@ -125,6 +125,37 @@ function parseJob(value: unknown, projectId: string): GenerationJob {
       ...(asset.favorite === undefined ? {} : { favorite: asset.favorite })
     }
   })
+  const rawReferences = value.references === undefined ? [] : value.references
+  if (!Array.isArray(rawReferences) || rawReferences.length > 16) {
+    throw new Error('历史记录参考图片结构无效。')
+  }
+  const references: StoredReferenceImage[] = rawReferences.map((reference, index) => {
+    if (!isRecord(reference)) throw new Error('参考图片元数据无效。')
+    const id = requireUuid(reference.id, `第 ${index + 1} 张参考图片 ID`)
+    const name = requireString(reference.name, '参考图片文件名', 200)
+    const mimeType = requireString(reference.mimeType, '参考图片 MIME 类型', 30)
+    if (!SAFE_ASSET_NAME.test(name) || !MIME_TYPES.has(mimeType)) {
+      throw new Error('参考图片文件名或格式无效。')
+    }
+    if (!Number.isSafeInteger(reference.size) || (reference.size as number) < 1) {
+      throw new Error('参考图片大小无效。')
+    }
+    return {
+      id,
+      name,
+      originalName: requireString(reference.originalName, '参考图片原始文件名', 500),
+      mimeType,
+      size: reference.size as number,
+      url: `image-deck://asset/${id}`,
+      sourceAssetId:
+        reference.sourceAssetId === undefined
+          ? undefined
+          : requireUuid(reference.sourceAssetId, '参考图片来源 ID')
+    }
+  })
+  if (value.references !== undefined && references.length !== referenceCount) {
+    throw new Error('参考图片数量与历史记录不一致。')
+  }
   let usage: GenerationJob['usage']
   if (value.usage !== undefined) {
     if (!isRecord(value.usage)) throw new Error('Token 用量无效。')
@@ -152,6 +183,7 @@ function parseJob(value: unknown, projectId: string): GenerationJob {
       value.sourceAssetId === undefined
         ? undefined
         : requireUuid(value.sourceAssetId, '来源图片 ID'),
+    model: optionalString(value.model, '模型名称', 200),
     request: {
       prompt: requireString(value.request.prompt, '请求提示词', 100000),
       n,
@@ -164,6 +196,7 @@ function parseJob(value: unknown, projectId: string): GenerationJob {
       referenceCount
     },
     assets,
+    references: references.length ? references : undefined,
     usage,
     error: optionalString(value.error, '错误信息', 100000)
   }
@@ -181,8 +214,9 @@ export function parseProjectArchiveManifest(value: unknown): ProjectArchiveManif
   const project = parseProject(value.project)
   const jobs = value.jobs.map((job) => parseJob(job, project.id))
   const jobIds = new Set(jobs.map((job) => job.id))
-  const assetIds = new Set(jobs.flatMap((job) => job.assets.map((asset) => asset.id)))
-  if (jobIds.size !== jobs.length || assetIds.size !== jobs.flatMap((job) => job.assets).length) {
+  const allAssets = jobs.flatMap((job) => [...job.assets, ...(job.references ?? [])])
+  const assetIds = new Set(allAssets.map((asset) => asset.id))
+  if (jobIds.size !== jobs.length || assetIds.size !== allAssets.length) {
     throw new Error('项目包包含重复 ID。')
   }
   for (const job of jobs) {
@@ -223,7 +257,9 @@ export function remapImportedProject(
   const projectId = createId()
   const jobIds = new Map(manifest.jobs.map((job) => [job.id, createId()]))
   const assetIds = new Map(
-    manifest.jobs.flatMap((job) => job.assets.map((asset) => [asset.id, createId()] as const))
+    manifest.jobs.flatMap((job) =>
+      [...job.assets, ...(job.references ?? [])].map((asset) => [asset.id, createId()] as const)
+    )
   )
   const jobs = manifest.jobs.map((job) => {
     const id = jobIds.get(job.id)
@@ -238,6 +274,16 @@ export function remapImportedProject(
         const assetId = assetIds.get(asset.id)
         if (!assetId) throw new Error('无法重映射图片 ID。')
         return { ...asset, id: assetId, url: `image-deck://asset/${assetId}` }
+      }),
+      references: job.references?.map((reference) => {
+        const referenceId = assetIds.get(reference.id)
+        if (!referenceId) throw new Error('无法重映射参考图片 ID。')
+        return {
+          ...reference,
+          id: referenceId,
+          url: `image-deck://asset/${referenceId}`,
+          sourceAssetId: reference.sourceAssetId ? assetIds.get(reference.sourceAssetId) : undefined
+        }
       })
     }
   })

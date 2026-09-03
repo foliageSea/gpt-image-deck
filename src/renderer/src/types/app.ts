@@ -1,9 +1,4 @@
-import type {
-  GeneratedAsset,
-  GenerationJob,
-  GenerationRequest,
-  ReferenceImage
-} from '../../../shared/image-types'
+import type { GenerationJob, GenerationRequest, ReferenceImage } from '../../../shared/image-types'
 
 export type Feedback = {
   type: 'info' | 'success' | 'error'
@@ -24,9 +19,17 @@ export type FlowCreation = {
   size: string
   quality: GenerationRequest['quality']
   n: number
-  leadingAssets: GeneratedAsset[]
-  leadingReferences: ReferenceImage[]
-  references: ReferenceImage[]
+  format: GenerationRequest['format']
+  compression: number
+  background: GenerationRequest['background']
+  inputFidelity: GenerationRequest['inputFidelity']
+  references: FlowReference[]
+}
+
+export type FlowReference = ReferenceImage & {
+  kind: 'asset' | 'reference'
+  assetId?: string
+  primary?: boolean
 }
 
 export type PendingFlowGeneration = {

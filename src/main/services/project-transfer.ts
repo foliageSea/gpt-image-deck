@@ -75,7 +75,7 @@ export async function exportProject(projectId: string): Promise<OperationResult>
     if (!project) throw new Error('项目不存在。')
     const jobs = await listHistory(projectId)
     for (const job of jobs) {
-      for (const asset of job.assets) {
+      for (const asset of [...job.assets, ...(job.references ?? [])]) {
         const file = await stat(storedAssetPath(job.id, asset.name))
         if (!file.isFile() || file.size !== asset.size) {
           throw new Error(`图片 ${asset.name} 缺失或大小不匹配，无法导出。`)
@@ -106,7 +106,7 @@ export async function exportProject(projectId: string): Promise<OperationResult>
     const output = pipeline(archive, createGzip({ level: 6 }), createWriteStream(temporaryPath))
     await addBufferEntry(archive, 'manifest.json', Buffer.from(JSON.stringify(manifest), 'utf8'))
     for (const job of jobs) {
-      for (const asset of job.assets) {
+      for (const asset of [...job.assets, ...(job.references ?? [])]) {
         await addFileEntry(
           archive,
           archiveAssetPath(job.id, asset.name),
@@ -119,7 +119,10 @@ export async function exportProject(projectId: string): Promise<OperationResult>
     await output
     await rename(temporaryPath, destination)
     temporaryPath = undefined
-    const assetCount = jobs.reduce((count, job) => count + job.assets.length, 0)
+    const assetCount = jobs.reduce(
+      (count, job) => count + job.assets.length + (job.references?.length ?? 0),
+      0
+    )
     return {
       success: true,
       message: `项目已导出，包含 ${jobs.length} 条历史记录和 ${assetCount} 张图片。`
@@ -173,7 +176,7 @@ async function extractProjectArchive(
         }
         expectedAssets = new Map(
           manifest.jobs.flatMap((job) =>
-            job.assets.map((asset) => [
+            [...job.assets, ...(job.references ?? [])].map((asset) => [
               archiveAssetPath(job.id, asset.name),
               { jobId: job.id, name: asset.name, size: asset.size }
             ])
@@ -235,7 +238,7 @@ async function commitImportedProject(
     for (const job of manifest.jobs) {
       const newJobId = remapped.oldJobIds.get(job.id)
       if (!newJobId) throw new Error('无法映射导入图片目录。')
-      if (!job.assets.length) continue
+      if (!job.assets.length && !job.references?.length) continue
       await rename(join(stagingPath, job.id), dataPath('assets', newJobId))
       movedJobIds.push(newJobId)
     }
@@ -243,7 +246,10 @@ async function commitImportedProject(
     historyAdded = true
     const nextState = await addImportedProject(remapped.project)
     projectAdded = true
-    const assetCount = remapped.jobs.reduce((count, job) => count + job.assets.length, 0)
+    const assetCount = remapped.jobs.reduce(
+      (count, job) => count + job.assets.length + (job.references?.length ?? 0),
+      0
+    )
     return {
       success: true,
       message: `项目“${remapped.project.name}”已导入。`,

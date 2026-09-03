@@ -59,7 +59,9 @@ function formatDate(value: string): string {
           <Badge :variant="data.job.parentJobId ? 'secondary' : 'outline'">
             {{ nodeType(data.job) }}
           </Badge>
-          <span class="text-[10px] text-muted-foreground">{{ data.job.assets.length }} 张</span>
+          <span class="text-[10px] text-muted-foreground">
+            {{ data.job.assets.length }} 张 · {{ data.job.request.referenceCount }} 个参考
+          </span>
         </div>
         <p class="line-clamp-3 text-xs font-medium leading-5">{{ data.job.prompt }}</p>
       </div>

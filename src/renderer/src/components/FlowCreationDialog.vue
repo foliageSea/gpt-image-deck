@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import type { GeneratedAsset, GenerationJob } from '../../../shared/image-types'
-import type { FlowCreation } from '@/types/app'
-import { BookOpenIcon, CircleCheckIcon, PlusIcon, SparklesIcon, XIcon } from '@lucide/vue'
+import type { FlowCreation, FlowReference } from '@/types/app'
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BookOpenIcon,
+  ImagePlusIcon,
+  PinIcon,
+  SparklesIcon,
+  XIcon
+} from '@lucide/vue'
 import { computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +22,8 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
@@ -23,6 +33,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 const props = defineProps<{ history: GenerationJob[] }>()
 const creation = defineModel<FlowCreation | null>('creation', { required: true })
@@ -32,102 +43,105 @@ const emit = defineEmits<{
   generate: []
 }>()
 
-const availableLeadingAssets = computed(() => {
-  const job = creation.value?.job
-  return job ? priorSourceAssets(job) : []
+const projectAssets = computed(() =>
+  props.history
+    .flatMap((job) => job.assets)
+    .sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)))
+)
+
+const invalidOutput = computed(
+  () => creation.value?.format === 'jpeg' && creation.value.background === 'transparent'
+)
+
+const canGenerate = computed(() => {
+  const draft = creation.value
+  return Boolean(
+    draft &&
+    draft.prompt.trim() &&
+    draft.prompt.length <= 32000 &&
+    draft.compression >= 0 &&
+    draft.compression <= 100 &&
+    !invalidOutput.value
+  )
 })
 
-function priorSourceAssets(job: GenerationJob): GeneratedAsset[] {
-  const jobsById = new Map(props.history.map((item) => [item.id, item]))
-  const assetsById = new Map(
-    props.history.flatMap((item) => item.assets.map((asset) => [asset.id, asset] as const))
-  )
-  const assets: GeneratedAsset[] = []
-  const visited = new Set<string>()
-  let current: GenerationJob | undefined = job
-  while (current && !visited.has(current.id)) {
-    visited.add(current.id)
-    if (current.sourceAssetId) {
-      const asset = assetsById.get(current.sourceAssetId)
-      if (asset) assets.push(asset)
-    }
-    current = current.parentJobId ? jobsById.get(current.parentJobId) : undefined
-  }
-  return assets.reverse().slice(-15)
-}
-
-async function pickReferences(position: 'before' | 'after' = 'after'): Promise<void> {
+async function pickReferences(): Promise<void> {
   const draft = creation.value
   if (!draft) return
   try {
     const picked = await window.imageDeck.pickReferenceImages()
-    const existingIds = new Set(
-      [...draft.leadingReferences, ...draft.references].map((item) => item.id)
-    )
-    const unique = picked.filter((item) => !existingIds.has(item.id))
-    const available =
-      (draft.job ? 15 : 16) -
-      draft.leadingAssets.length -
-      draft.leadingReferences.length -
-      draft.references.length
-    if (position === 'before') draft.leadingReferences.push(...unique.slice(0, available))
-    else draft.references.push(...unique.slice(0, available))
+    const existingIds = new Set(draft.references.map((item) => item.id))
+    const available = 16 - draft.references.length
+    const references: FlowReference[] = picked
+      .filter((item) => !existingIds.has(item.id))
+      .slice(0, available)
+      .map((item) => ({ ...item, kind: 'reference' }))
+    draft.references.push(...references)
+    if (picked.length > references.length) toast.info('参考图片最多 16 张。')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '参考图片读取失败。')
   }
 }
 
-function removeReference(id: string, position: 'before' | 'after' = 'after'): void {
-  if (!creation.value) return
-  const key = position === 'before' ? 'leadingReferences' : 'references'
-  creation.value[key] = creation.value[key].filter((item) => item.id !== id)
-}
-
-function toggleLeadingAsset(asset: GeneratedAsset): void {
+function toggleProjectAsset(asset: GeneratedAsset): void {
   const draft = creation.value
   if (!draft) return
-  if (draft.leadingAssets.some((item) => item.id === asset.id)) {
-    draft.leadingAssets = draft.leadingAssets.filter((item) => item.id !== asset.id)
+  const index = draft.references.findIndex((item) => item.assetId === asset.id)
+  if (index >= 0) {
+    removeReference(index)
     return
   }
-  if (draft.leadingAssets.length + draft.leadingReferences.length + draft.references.length >= 15) {
-    toast.info('参考图片最多 16 张（含当前节点）。')
+  if (draft.references.length >= 16) {
+    toast.info('参考图片最多 16 张。')
     return
   }
-  draft.leadingAssets.push(asset)
+  draft.references.push({ ...asset, kind: 'asset', assetId: asset.id })
 }
 
-function isLeadingAssetSelected(asset: GeneratedAsset): boolean {
-  return creation.value?.leadingAssets.some((item) => item.id === asset.id) ?? false
+function isAssetSelected(asset: GeneratedAsset): boolean {
+  return creation.value?.references.some((item) => item.assetId === asset.id) ?? false
 }
 
-function referenceOrder(
-  kind: 'leading-asset' | 'leading-reference' | 'source' | 'reference',
-  id?: string
-): number | undefined {
+function removeReference(index: number): void {
   const draft = creation.value
-  if (!draft) return undefined
-  if (kind === 'leading-asset') {
-    const index = draft.leadingAssets.findIndex((item) => item.id === id)
-    return index < 0 ? undefined : index + 1
-  }
-  if (kind === 'leading-reference') {
-    const index = draft.leadingReferences.findIndex((item) => item.id === id)
-    return index < 0 ? undefined : draft.leadingAssets.length + index + 1
-  }
-  const sourceOrder = draft.leadingAssets.length + draft.leadingReferences.length + 1
-  if (kind === 'source') return draft.job ? sourceOrder : undefined
-  const index = draft.references.findIndex((item) => item.id === id)
-  if (index < 0) return undefined
-  return (
-    draft.leadingAssets.length + draft.leadingReferences.length + (draft.job ? 1 : 0) + index + 1
-  )
+  if (!draft) return
+  const [removed] = draft.references.splice(index, 1)
+  if (removed?.primary && draft.job && draft.references[0]) draft.references[0].primary = true
+}
+
+function moveReference(index: number, offset: -1 | 1): void {
+  const references = creation.value?.references
+  const target = index + offset
+  if (!references || target < 0 || target >= references.length) return
+  const [item] = references.splice(index, 1)
+  references.splice(target, 0, item)
+}
+
+function setPrimary(index: number): void {
+  const references = creation.value?.references
+  if (!references) return
+  references.forEach((item, itemIndex) => (item.primary = itemIndex === index))
+}
+
+function reuseStoredReferences(): void {
+  const draft = creation.value
+  const stored = draft?.job?.references ?? []
+  if (!draft || !stored.length) return
+  const existingIds = new Set(draft.references.map((item) => item.id))
+  const additions = stored
+    .filter((item) => !existingIds.has(item.id))
+    .slice(0, 16 - draft.references.length)
+    .map((item): FlowReference => ({ ...item, kind: 'reference' }))
+  draft.references.push(...additions)
+  if (additions.length < stored.length) toast.info('部分参考图已存在或超出 16 张上限。')
 }
 </script>
 
 <template>
   <Dialog :open="Boolean(creation)" @update:open="!$event && (creation = null)">
-    <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+    <DialogContent
+      class="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-3xl"
+    >
       <DialogHeader>
         <DialogTitle>
           {{
@@ -135,23 +149,32 @@ function referenceOrder(
           }}
         </DialogTitle>
       </DialogHeader>
-      <div v-if="creation" class="flex flex-col gap-5">
-        <div v-if="creation.job" class="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
+
+      <div v-if="creation" class="-mr-2 flex min-h-0 flex-col gap-5 overflow-y-auto pr-2">
+        <div v-if="creation.job" class="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
           <img
-            v-if="creation.job.assets[0]"
-            :src="creation.job.assets[0].url"
-            alt="来源节点图片"
+            v-if="creation.references.find((item) => item.primary)"
+            :src="creation.references.find((item) => item.primary)?.url"
+            alt="主参考图片"
             class="size-16 rounded-lg object-cover"
           />
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <Badge variant="secondary">来源节点</Badge>
-            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {{ creation.job.prompt }}
-            </p>
+            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ creation.job.prompt }}</p>
           </div>
+          <Button
+            v-if="creation.job.references?.length"
+            variant="outline"
+            size="sm"
+            type="button"
+            @click="reuseStoredReferences"
+          >
+            复用原参考图
+          </Button>
         </div>
+
         <FieldGroup>
-          <Field>
+          <Field :data-invalid="creation.prompt.length > 32000">
             <div class="flex items-center justify-between">
               <FieldLabel for="flow-prompt">提示词</FieldLabel>
               <Button variant="ghost" size="xs" type="button" @click="emit('openPromptLibrary')">
@@ -162,148 +185,144 @@ function referenceOrder(
               id="flow-prompt"
               v-model="creation.prompt"
               class="min-h-32 resize-none"
-              :placeholder="
-                creation.job ? '描述希望基于当前节点继续生成的画面……' : '描述希望创建的画面……'
-              "
+              maxlength="32000"
+              :aria-invalid="creation.prompt.length > 32000"
+              :placeholder="creation.job ? '描述希望如何修改主参考图片……' : '描述希望创建的画面……'"
             />
             <FieldDescription class="flex justify-end">
               <span>{{ creation.prompt.length }}/32000</span>
             </FieldDescription>
           </Field>
-          <Field v-if="creation.job">
-            <FieldLabel>当前节点前的参考图</FieldLabel>
-            <div class="grid grid-cols-6 gap-2">
-              <button
-                v-for="asset in availableLeadingAssets"
-                :key="asset.id"
-                type="button"
-                :class="[
-                  'relative aspect-square overflow-hidden rounded-lg border bg-muted transition-colors disabled:pointer-events-none disabled:opacity-50',
-                  isLeadingAssetSelected(asset)
-                    ? 'border-primary ring-2 ring-primary/30'
-                    : 'hover:border-primary/50'
-                ]"
-                :aria-pressed="isLeadingAssetSelected(asset)"
-                @click="toggleLeadingAsset(asset)"
-              >
-                <img :src="asset.url" :alt="asset.name" class="size-full object-cover" />
-                <Badge
-                  v-if="referenceOrder('leading-asset', asset.id)"
-                  class="absolute left-1 top-1"
-                >
-                  {{ referenceOrder('leading-asset', asset.id) }}
-                </Badge>
-                <Badge
-                  v-if="isLeadingAssetSelected(asset)"
-                  class="absolute bottom-1 left-1"
-                  variant="secondary"
-                >
-                  <CircleCheckIcon />已选
-                </Badge>
-              </button>
-              <div
-                v-for="image in creation.leadingReferences"
-                :key="image.id"
-                class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
-              >
-                <img :src="image.url" :alt="image.name" class="size-full object-cover" />
-                <Badge class="absolute left-1 top-1">
-                  {{ referenceOrder('leading-reference', image.id) }}
-                </Badge>
-                <Button
-                  variant="destructive"
-                  size="icon-xs"
-                  class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
-                  aria-label="移除当前节点前的参考图"
-                  @click="removeReference(image.id, 'before')"
-                >
-                  <XIcon />
-                </Button>
-              </div>
-              <button
-                v-if="
-                  creation.leadingAssets.length +
-                    creation.leadingReferences.length +
-                    creation.references.length <
-                  15
-                "
-                type="button"
-                class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                aria-label="上传当前节点前的参考图片"
-                @click="pickReferences('before')"
-              >
-                <PlusIcon class="size-4" />
-              </button>
-            </div>
-          </Field>
+
           <Field>
-            <div class="flex items-center justify-between">
-              <FieldLabel>{{ creation.job ? '当前节点后的参考图' : '参考图片' }}</FieldLabel>
-              <span class="text-xs text-muted-foreground">
-                {{
-                  creation.references.length +
-                  creation.leadingAssets.length +
-                  creation.leadingReferences.length +
-                  (creation.job ? 1 : 0)
-                }}/16
-              </span>
-            </div>
-            <div class="grid grid-cols-6 gap-2">
-              <div
-                v-if="creation.job"
-                class="relative aspect-square overflow-hidden rounded-lg border bg-muted"
+            <div class="flex items-center justify-between gap-3">
+              <FieldLabel>参考图序列</FieldLabel>
+              <span class="shrink-0 text-xs text-muted-foreground"
+                >{{ creation.references.length }}/16</span
               >
-                <img
-                  v-if="creation.job.assets[0]"
-                  :src="creation.job.assets[0].url"
-                  alt="来源节点参考图"
-                  class="size-full object-cover"
-                />
-                <Badge class="absolute left-1 top-1">{{ referenceOrder('source') }}</Badge>
-                <Badge class="absolute bottom-1 left-1" variant="secondary">节点</Badge>
-              </div>
+            </div>
+            <FieldDescription>序号即发送顺序；主参考用于标记当前分支来源。</FieldDescription>
+
+            <div v-if="creation.references.length" class="grid grid-cols-3 gap-2 sm:grid-cols-6">
               <div
-                v-for="image in creation.references"
-                :key="image.id"
+                v-for="(image, index) in creation.references"
+                :key="`${image.kind}-${image.id}`"
                 class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
               >
                 <img :src="image.url" :alt="image.name" class="size-full object-cover" />
-                <Badge class="absolute left-1 top-1">
-                  {{ referenceOrder('reference', image.id) }}
+                <Badge class="absolute left-1 top-1">{{ index + 1 }}</Badge>
+                <Badge v-if="image.primary" class="absolute bottom-1 left-1" variant="secondary">
+                  主参考
                 </Badge>
-                <Button
-                  variant="destructive"
-                  size="icon-xs"
-                  class="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
-                  aria-label="移除参考图"
-                  @click="removeReference(image.id)"
+                <div
+                  class="absolute right-1 top-1 flex flex-col gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
                 >
-                  <XIcon />
-                </Button>
+                  <TooltipProvider :delay-duration="250">
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="secondary"
+                          size="icon-xs"
+                          :disabled="index === 0"
+                          aria-label="前移参考图"
+                          @click="moveReference(index, -1)"
+                        >
+                          <ArrowLeftIcon />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>前移</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="secondary"
+                          size="icon-xs"
+                          :disabled="index === creation.references.length - 1"
+                          aria-label="后移参考图"
+                          @click="moveReference(index, 1)"
+                        >
+                          <ArrowRightIcon />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>后移</TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-if="creation.job && !image.primary">
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="secondary"
+                          size="icon-xs"
+                          aria-label="设为主参考"
+                          @click="setPrimary(index)"
+                        >
+                          <PinIcon />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>设为主参考</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="destructive"
+                          size="icon-xs"
+                          aria-label="移除参考图"
+                          @click="removeReference(index)"
+                        >
+                          <XIcon />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>移除</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
               </div>
-              <button
-                v-if="
-                  creation.references.length +
-                    creation.leadingAssets.length +
-                    creation.leadingReferences.length <
-                  (creation.job ? 15 : 16)
-                "
-                type="button"
-                class="flex aspect-square items-center justify-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                aria-label="继续上传参考图片"
-                @click="pickReferences('after')"
-              >
-                <PlusIcon class="size-4" />
-              </button>
             </div>
+
+            <Button
+              variant="outline"
+              type="button"
+              :disabled="creation.references.length >= 16"
+              @click="pickReferences"
+            >
+              <ImagePlusIcon data-icon="inline-start" />从本地添加
+            </Button>
           </Field>
-          <div class="grid grid-cols-3 gap-3">
+
+          <Field v-if="projectAssets.length">
+            <FieldLabel>项目图片</FieldLabel>
+            <FieldDescription>点击可将任意历史结果加入或移出参考序列。</FieldDescription>
+            <ScrollArea class="w-full whitespace-nowrap rounded-lg border">
+              <div class="flex w-max gap-2 p-2">
+                <button
+                  v-for="asset in projectAssets"
+                  :key="asset.id"
+                  type="button"
+                  :class="[
+                    'relative size-16 shrink-0 overflow-hidden rounded-lg border bg-muted transition-colors',
+                    isAssetSelected(asset)
+                      ? 'border-primary ring-2 ring-primary/30'
+                      : 'hover:border-primary/50'
+                  ]"
+                  :aria-pressed="isAssetSelected(asset)"
+                  @click="toggleProjectAsset(asset)"
+                >
+                  <img :src="asset.url" :alt="asset.name" class="size-full object-cover" />
+                  <Badge v-if="asset.favorite" class="absolute bottom-1 left-1" variant="secondary"
+                    >收藏</Badge
+                  >
+                </button>
+              </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
+          </Field>
+
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Field>
               <FieldLabel>画幅</FieldLabel>
               <Select v-model="creation.size">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
+                    <SelectItem value="auto">自动</SelectItem>
                     <SelectItem value="1024x1024">1:1</SelectItem>
                     <SelectItem value="1536x1024">3:2</SelectItem>
                     <SelectItem value="1024x1536">2:3</SelectItem>
@@ -326,26 +345,85 @@ function referenceOrder(
               </Select>
             </Field>
             <Field>
-              <FieldLabel>分支数量</FieldLabel>
+              <FieldLabel>输出数量</FieldLabel>
               <Select v-model="creation.n">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem v-for="count in 4" :key="count" :value="count">
-                      {{ count }} 个分支
-                    </SelectItem>
+                    <SelectItem v-for="count in 4" :key="count" :value="count"
+                      >{{ count }} 个节点</SelectItem
+                    >
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>格式</FieldLabel>
+              <Select v-model="creation.format">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="png">PNG</SelectItem>
+                    <SelectItem value="jpeg">JPEG</SelectItem>
+                    <SelectItem value="webp">WebP</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
           </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field :data-invalid="invalidOutput">
+              <FieldLabel>背景</FieldLabel>
+              <Select v-model="creation.background">
+                <SelectTrigger :aria-invalid="invalidOutput"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="auto">自动</SelectItem>
+                    <SelectItem value="opaque">不透明</SelectItem>
+                    <SelectItem value="transparent">透明</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription v-if="invalidOutput">JPEG 不支持透明背景。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel for="flow-compression">压缩质量</FieldLabel>
+              <Input
+                id="flow-compression"
+                :model-value="creation.compression"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                :disabled="creation.format === 'png'"
+                @update:model-value="creation.compression = Number($event)"
+              />
+              <FieldDescription>{{
+                creation.format === 'png' ? 'PNG 不使用此参数' : '0–100'
+              }}</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>输入一致性</FieldLabel>
+              <Select v-model="creation.inputFidelity" :disabled="!creation.references.length">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="low">灵活</SelectItem>
+                    <SelectItem value="high">严格</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>GPT Image 2 会自动高保真处理。</FieldDescription>
+            </Field>
+          </div>
         </FieldGroup>
       </div>
+
       <DialogFooter>
         <Button variant="outline" @click="creation = null">取消</Button>
-        <Button :disabled="!creation?.prompt.trim()" @click="emit('generate')">
-          <SparklesIcon data-icon="inline-start" />
-          生成并加入画布
+        <Button :disabled="!canGenerate" @click="emit('generate')">
+          <SparklesIcon data-icon="inline-start" />生成并加入画布
         </Button>
       </DialogFooter>
     </DialogContent>

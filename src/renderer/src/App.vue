@@ -29,6 +29,7 @@ const form = reactive<GenerationRequest>({
   projectId: '',
   prompt: '',
   referenceIds: [],
+  referenceAssetIds: [],
   n: 1,
   size: '1024x1024',
   quality: 'auto',
@@ -144,14 +145,14 @@ async function load(): Promise<void> {
 }
 
 function continueWithAsset(
-  _asset: GeneratedAsset,
+  asset: GeneratedAsset,
   variant = false,
   sourceJob = selectedJob.value
 ): void {
   if (!sourceJob) return
   selectJob(sourceJob)
   previewOpen.value = false
-  openCreation(sourceJob, variant)
+  openCreation(sourceJob, variant, asset)
 }
 
 function fillPrompt(prompt: PromptTemplate): void {

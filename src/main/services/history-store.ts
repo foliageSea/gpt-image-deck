@@ -1,6 +1,6 @@
 import type { GenerationJob } from '../../shared/image-types'
 import { dataPath, readJson, writeJson } from './storage'
-import { deleteJobAssets, restoreAssets } from './asset-store'
+import { deleteJobAssets, restoreAssets, restoreReferences } from './asset-store'
 import { getDefaultProjectId } from './project-store'
 
 let cache: GenerationJob[] | null = null
@@ -17,7 +17,10 @@ async function history(): Promise<GenerationJob[]> {
       return { ...job, projectId: defaultProjectId }
     })
     if (migrated) await writeJson(historyPath(), cache)
-    for (const job of cache) restoreAssets(job.id, job.assets)
+    for (const job of cache) {
+      restoreAssets(job.id, job.assets)
+      restoreReferences(job.id, job.references)
+    }
   }
   return cache
 }
@@ -40,11 +43,14 @@ export async function addHistory(job: GenerationJob): Promise<void> {
 export async function addImportedHistory(jobs: GenerationJob[]): Promise<void> {
   const values = await history()
   const existingJobIds = new Set(values.map((job) => job.id))
-  const existingAssetIds = new Set(values.flatMap((job) => job.assets.map((asset) => asset.id)))
+  const existingAssetIds = new Set(
+    values.flatMap((job) => [...job.assets, ...(job.references ?? [])].map((asset) => asset.id))
+  )
   if (
     jobs.some(
       (job) =>
-        existingJobIds.has(job.id) || job.assets.some((asset) => existingAssetIds.has(asset.id))
+        existingJobIds.has(job.id) ||
+        [...job.assets, ...(job.references ?? [])].some((asset) => existingAssetIds.has(asset.id))
     )
   ) {
     throw new Error('导入项目的历史记录 ID 与现有数据冲突。')
@@ -52,7 +58,10 @@ export async function addImportedHistory(jobs: GenerationJob[]): Promise<void> {
   const next = [...jobs, ...values]
   await writeJson(historyPath(), next)
   cache = next
-  for (const job of jobs) restoreAssets(job.id, job.assets)
+  for (const job of jobs) {
+    restoreAssets(job.id, job.assets)
+    restoreReferences(job.id, job.references)
+  }
 }
 
 export async function deleteHistory(jobId: string): Promise<void> {

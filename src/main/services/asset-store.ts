@@ -1,4 +1,4 @@
-import type { GeneratedAsset, ReferenceImage } from '../../shared/image-types'
+import type { GeneratedAsset, ReferenceImage, StoredReferenceImage } from '../../shared/image-types'
 import { app, clipboard, dialog, nativeImage, shell } from 'electron'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
@@ -12,7 +12,7 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp'
 }
 
-const references = new Map<string, { path: string; value: ReferenceImage }>()
+const references = new Map<string, { path: string; value: ReferenceImage; jobId?: string }>()
 const assets = new Map<string, { path: string; value: GeneratedAsset; jobId: string }>()
 
 export function assetUrl(id: string): string {
@@ -54,6 +54,44 @@ export function getReferences(
     if (!reference) throw new Error('参考图片已失效，请重新选择。')
     return { path: reference.path, mimeType: reference.value.mimeType, name: reference.value.name }
   })
+}
+
+export async function persistJobReferences(
+  jobId: string,
+  ids: string[],
+  sourceAssetIds: Array<string | null>
+): Promise<StoredReferenceImage[]> {
+  const selected = getReferences(ids)
+  if (sourceAssetIds.length !== selected.length) throw new Error('参考图片来源信息无效。')
+  if (!selected.length) return []
+  const directory = dataPath('assets', jobId)
+  await ensureDirectory(directory)
+  return Promise.all(
+    selected.map(async (reference, index) => {
+      const id = randomUUID()
+      const extension =
+        reference.mimeType === 'image/jpeg'
+          ? '.jpg'
+          : reference.mimeType === 'image/webp'
+            ? '.webp'
+            : '.png'
+      const name = `reference-${String(index + 1).padStart(2, '0')}-${id}${extension}`
+      const path = join(directory, name)
+      await copyFile(reference.path, path)
+      const file = await stat(path)
+      const value: StoredReferenceImage = {
+        id,
+        name,
+        originalName: reference.name,
+        mimeType: reference.mimeType,
+        size: file.size,
+        url: assetUrl(id),
+        ...(sourceAssetIds[index] ? { sourceAssetId: sourceAssetIds[index] ?? undefined } : {})
+      }
+      references.set(id, { path, value, jobId })
+      return value
+    })
+  )
 }
 
 export function useAssetAsReference(id: string): ReferenceImage {
@@ -110,6 +148,12 @@ export function resolveAsset(id: string): { path: string; mimeType: string } | u
 export function restoreAssets(jobId: string, values: GeneratedAsset[]): void {
   for (const value of values) {
     assets.set(value.id, { path: join(dataPath('assets', jobId), value.name), value, jobId })
+  }
+}
+
+export function restoreReferences(jobId: string, values: StoredReferenceImage[] = []): void {
+  for (const value of values) {
+    references.set(value.id, { path: join(dataPath('assets', jobId), value.name), value, jobId })
   }
 }
 
@@ -174,6 +218,9 @@ export async function showAsset(id: string): Promise<void> {
 export async function deleteJobAssets(jobId: string): Promise<void> {
   for (const [id, asset] of assets) {
     if (asset.jobId === jobId) assets.delete(id)
+  }
+  for (const [id, reference] of references) {
+    if (reference.jobId === jobId) references.delete(id)
   }
   await removePath(dataPath('assets', jobId))
 }

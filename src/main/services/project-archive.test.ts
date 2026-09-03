@@ -13,7 +13,8 @@ const ids = {
   project: '11111111-1111-4111-8111-111111111111',
   parent: '22222222-2222-4222-8222-222222222222',
   child: '33333333-3333-4333-8333-333333333333',
-  asset: '44444444-4444-4444-8444-444444444444'
+  asset: '44444444-4444-4444-8444-444444444444',
+  reference: '55555555-5555-4555-8555-555555555555'
 }
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -79,6 +80,28 @@ describe('project archive manifest', () => {
     expect(parsed.jobs[0].assets[0].url).toBe(`image-deck://asset/${ids.asset}`)
   })
 
+  it('validates persisted reference snapshots', () => {
+    const value = manifest()
+    value.jobs[1].request.referenceCount = 1
+    value.jobs[1].references = [
+      {
+        id: ids.reference,
+        name: `reference-01-${ids.reference}.png`,
+        originalName: '角色设定.png',
+        mimeType: 'image/png',
+        size: 456,
+        url: 'https://untrusted.example/reference.png',
+        sourceAssetId: ids.asset
+      }
+    ]
+    const parsed = parseProjectArchiveManifest(value)
+    expect(parsed.jobs[1].references?.[0]).toMatchObject({
+      url: `image-deck://asset/${ids.reference}`,
+      originalName: '角色设定.png',
+      sourceAssetId: ids.asset
+    })
+  })
+
   it('rejects path traversal and dangling relationships', () => {
     const traversal = manifest()
     traversal.jobs[0].assets[0].name = '../image.png'
@@ -117,6 +140,28 @@ describe('project import remapping', () => {
       `image-deck://asset/${remapped.jobs[0].assets[0].id}`
     )
     expect(remapped.jobs.every((value) => value.projectId === remapped.project.id)).toBe(true)
+  })
+
+  it('remaps persisted reference IDs and their generated sources', () => {
+    const value = manifest()
+    value.jobs[1].request.referenceCount = 1
+    value.jobs[1].references = [
+      {
+        id: ids.reference,
+        name: `reference-01-${ids.reference}.png`,
+        originalName: 'reference.png',
+        mimeType: 'image/png',
+        size: 456,
+        url: `image-deck://asset/${ids.reference}`,
+        sourceAssetId: ids.asset
+      }
+    ]
+    const parsed = parseProjectArchiveManifest(value)
+    const remapped = remapImportedProject(parsed, [])
+    const reference = remapped.jobs[1].references?.[0]
+    expect(reference?.id).not.toBe(ids.reference)
+    expect(reference?.sourceAssetId).toBe(remapped.jobs[0].assets[0].id)
+    expect(reference?.url).toBe(`image-deck://asset/${reference?.id}`)
   })
 
   it('creates bounded, case-insensitively unique copy names', () => {
