@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { GenerationJob } from '../../../shared/image-types'
 import { Handle, Position } from '@vue-flow/core'
-import { Clock3Icon, GitBranchIcon, ImageIcon, SparklesIcon, Trash2Icon } from '@lucide/vue'
+import {
+  Clock3Icon,
+  GitBranchIcon,
+  HeartIcon,
+  ImageIcon,
+  SparklesIcon,
+  Trash2Icon
+} from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
@@ -42,7 +49,7 @@ function formatDate(value: string): string {
     @dblclick="data.onSelect(data.job)"
   >
     <div class="flex items-start gap-3 p-3">
-      <div class="size-20 shrink-0 overflow-hidden rounded-lg bg-muted">
+      <div class="relative size-20 shrink-0 overflow-hidden rounded-lg bg-muted">
         <img
           v-if="data.job.assets[0]"
           :src="data.job.assets[0].url"
@@ -53,6 +60,15 @@ function formatDate(value: string): string {
         <div v-else class="flex size-full items-center justify-center">
           <ImageIcon class="size-5 text-muted-foreground" />
         </div>
+        <Badge
+          v-if="data.job.assets.some((asset) => asset.favorite)"
+          variant="secondary"
+          class="absolute bottom-1 left-1 gap-1 bg-background/90 px-1.5 shadow-sm backdrop-blur"
+          :aria-label="`${data.job.assets.filter((asset) => asset.favorite).length} 张已收藏`"
+        >
+          <HeartIcon class="fill-current" />
+          {{ data.job.assets.filter((asset) => asset.favorite).length }}
+        </Badge>
       </div>
       <div class="min-w-0 flex-1">
         <div class="mb-1.5 flex items-center gap-1.5">

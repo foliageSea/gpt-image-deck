@@ -13,6 +13,7 @@ import {
   FolderIcon,
   FocusIcon,
   GitBranchIcon,
+  HeartIcon,
   ImagePlusIcon,
   LayoutGridIcon,
   PlusIcon,
@@ -43,6 +44,7 @@ const props = defineProps<{
   currentProjectId: string
   selectedJobId?: string
   projectBusy?: boolean
+  favoriteCount?: number
   backgroundImageUrl?: string
   pendingGenerations?: {
     id: string
@@ -66,6 +68,7 @@ const emit = defineEmits<{
   createRoot: []
   switchProject: [projectId: unknown]
   manageProjects: []
+  openFavorites: []
   delete: [job: GenerationJob]
   cancelGeneration: [requestId: string]
   removeGeneration: [requestId: string]
@@ -248,6 +251,16 @@ function selectNode({ node }: NodeMouseEvent): void {
           @click="emit('manageProjects')"
         >
           <PlusIcon />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          :aria-label="`查看收藏图片，共 ${favoriteCount ?? 0} 张`"
+          @click="emit('openFavorites')"
+        >
+          <HeartIcon data-icon="inline-start" :class="favoriteCount && 'fill-current'" />
+          收藏
+          <Badge v-if="favoriteCount" variant="secondary">{{ favoriteCount }}</Badge>
         </Button>
         <Button size="sm" @click="emit('createRoot')">
           <ImagePlusIcon data-icon="inline-start" />新建节点

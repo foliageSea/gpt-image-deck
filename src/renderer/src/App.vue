@@ -5,6 +5,7 @@ import { LoaderCircleIcon } from '@lucide/vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import FlowCreationDialog from '@/components/FlowCreationDialog.vue'
+import FavoritesDialog from '@/components/FavoritesDialog.vue'
 import GenerationFlow from '@/components/GenerationFlow.vue'
 import ImagePreview from '@/components/ImagePreview.vue'
 import ProjectManagerDialog from '@/components/ProjectManagerDialog.vue'
@@ -39,6 +40,7 @@ const form = reactive<GenerationRequest>({
   inputFidelity: 'low'
 })
 const pendingFlowGenerations = ref<PendingFlowGeneration[]>([])
+const favoritesOpen = ref(false)
 
 const {
   settings,
@@ -68,6 +70,7 @@ const {
   deletingProject,
   exportingProject,
   importingProject,
+  exportingFavorites,
   history,
   selectedJob,
   selectedAsset,
@@ -76,6 +79,7 @@ const {
   deletingJob,
   currentProject,
   currentAssets,
+  favoriteEntries,
   projectTransferBusy,
   initialize: initializeWorkspace,
   switchProject,
@@ -89,7 +93,9 @@ const {
   confirmDeleteProject,
   selectJob,
   previewJob,
+  previewFavorite,
   toggleFavorite,
+  exportFavorites,
   deleteJob,
   saveAsset,
   copyAsset,
@@ -171,6 +177,7 @@ onMounted(load)
     :current-project-id="projectState.currentProjectId"
     :selected-job-id="selectedJob?.id"
     :project-busy="projectBusy || changingProject"
+    :favorite-count="favoriteEntries.length"
     :background-image-url="backgroundImageUrl"
     :pending-generations="currentPendingGenerations"
     @select="selectJob"
@@ -179,6 +186,7 @@ onMounted(load)
     @create-root="openRootCreation"
     @switch-project="switchProject"
     @manage-projects="projectsOpen = true"
+    @open-favorites="favoritesOpen = true"
     @delete="pendingDeleteJob = $event"
     @cancel-generation="cancelGeneration"
     @remove-generation="removeGeneration"
@@ -251,6 +259,15 @@ onMounted(load)
     :history="history"
     @open-prompt-library="promptsOpen = true"
     @generate="generate"
+  />
+
+  <FavoritesDialog
+    v-model:open="favoritesOpen"
+    :entries="favoriteEntries"
+    :exporting="exportingFavorites"
+    @preview="previewFavorite"
+    @favorite="toggleFavorite"
+    @export="exportFavorites"
   />
 
   <PromptLibraryDialog

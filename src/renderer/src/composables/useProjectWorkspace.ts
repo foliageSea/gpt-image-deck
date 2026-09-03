@@ -5,7 +5,7 @@ import type {
   Project,
   ProjectState
 } from '../../../shared/image-types'
-import type { PendingFlowGeneration } from '@/types/app'
+import type { FavoriteAssetEntry, PendingFlowGeneration } from '@/types/app'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
@@ -23,6 +23,7 @@ export type ProjectWorkspaceController = {
   deletingProject: Ref<boolean>
   exportingProject: Ref<boolean>
   importingProject: Ref<boolean>
+  exportingFavorites: Ref<boolean>
   history: Ref<GenerationJob[]>
   selectedJob: Ref<GenerationJob | null>
   selectedAsset: Ref<GeneratedAsset | null>
@@ -31,6 +32,7 @@ export type ProjectWorkspaceController = {
   deletingJob: Ref<boolean>
   currentProject: ComputedRef<Project | undefined>
   currentAssets: ComputedRef<GeneratedAsset[]>
+  favoriteEntries: ComputedRef<FavoriteAssetEntry[]>
   projectTransferBusy: ComputedRef<boolean>
   initialize: (nextProjects: ProjectState, nextHistory: GenerationJob[]) => void
   switchProject: (projectId: unknown) => Promise<void>
@@ -44,7 +46,9 @@ export type ProjectWorkspaceController = {
   confirmDeleteProject: () => void
   selectJob: (job: GenerationJob | null) => void
   previewJob: (job: GenerationJob) => void
+  previewFavorite: (asset: GeneratedAsset) => void
   toggleFavorite: (asset: GeneratedAsset) => Promise<void>
+  exportFavorites: () => Promise<void>
   deleteJob: () => Promise<void>
   saveAsset: (asset: GeneratedAsset) => Promise<void>
   copyAsset: (asset: GeneratedAsset) => Promise<void>
@@ -69,19 +73,26 @@ export function useProjectWorkspace(
   const deletingProject = ref(false)
   const exportingProject = ref(false)
   const importingProject = ref(false)
+  const exportingFavorites = ref(false)
   const history = ref<GenerationJob[]>([])
   const selectedJob = ref<GenerationJob | null>(null)
   const selectedAsset = ref<GeneratedAsset | null>(null)
   const previewOpen = ref(false)
   const pendingDeleteJob = ref<GenerationJob | null>(null)
   const deletingJob = ref(false)
+  const previewAssets = ref<GeneratedAsset[]>([])
 
   const currentProject = computed(() =>
     projectState.value.projects.find(
       (project) => project.id === projectState.value.currentProjectId
     )
   )
-  const currentAssets = computed(() => selectedJob.value?.assets ?? [])
+  const currentAssets = computed(() => previewAssets.value)
+  const favoriteEntries = computed(() =>
+    history.value.flatMap((job) =>
+      job.assets.filter((asset) => asset.favorite).map((asset) => ({ asset, job }))
+    )
+  )
   const projectTransferBusy = computed(() => exportingProject.value || importingProject.value)
 
   watch(projectsOpen, (open) => {
@@ -230,8 +241,17 @@ export function useProjectWorkspace(
 
   function previewJob(job: GenerationJob): void {
     selectJob(job)
+    previewAssets.value = job.assets
     const asset = job.assets[0]
     if (asset) openPreview(asset)
+  }
+
+  function previewFavorite(asset: GeneratedAsset): void {
+    const owner = history.value.find((job) => job.assets.some((item) => item.id === asset.id))
+    if (!owner) return
+    selectJob(owner)
+    previewAssets.value = favoriteEntries.value.map((entry) => entry.asset)
+    openPreview(asset)
   }
 
   async function toggleFavorite(asset: GeneratedAsset): Promise<void> {
@@ -244,9 +264,31 @@ export function useProjectWorkspace(
         selectedAsset.value =
           updated.assets.find((item) => item.id === asset.id) ?? updated.assets[0] ?? null
       }
+      const previewIndex = previewAssets.value.findIndex((item) => item.id === asset.id)
+      const updatedAsset = updated.assets.find((item) => item.id === asset.id)
+      if (previewIndex >= 0 && updatedAsset) previewAssets.value[previewIndex] = updatedAsset
       toast.success(asset.favorite ? '已取消收藏。' : '已收藏图片。')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '收藏操作失败。')
+    }
+  }
+
+  async function exportFavorites(): Promise<void> {
+    if (exportingFavorites.value) return
+    const assetIds = favoriteEntries.value.map((entry) => entry.asset.id)
+    if (!assetIds.length) {
+      toast.info('还没有收藏图片。')
+      return
+    }
+    exportingFavorites.value = true
+    try {
+      const result = await api.saveAssets(assetIds)
+      if (result.success) toast.success(result.message ?? '收藏图片已导出。')
+      else toast.info(result.message ?? '已取消导出。')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '收藏图片导出失败。')
+    } finally {
+      exportingFavorites.value = false
     }
   }
 
@@ -291,6 +333,8 @@ export function useProjectWorkspace(
   }
 
   function selectPreviewAsset(asset: GeneratedAsset): void {
+    const owner = history.value.find((job) => job.assets.some((item) => item.id === asset.id))
+    if (owner) selectedJob.value = owner
     selectedAsset.value = asset
   }
 
@@ -307,6 +351,7 @@ export function useProjectWorkspace(
     deletingProject,
     exportingProject,
     importingProject,
+    exportingFavorites,
     history,
     selectedJob,
     selectedAsset,
@@ -315,6 +360,7 @@ export function useProjectWorkspace(
     deletingJob,
     currentProject,
     currentAssets,
+    favoriteEntries,
     projectTransferBusy,
     initialize,
     switchProject,
@@ -328,7 +374,9 @@ export function useProjectWorkspace(
     confirmDeleteProject,
     selectJob,
     previewJob,
+    previewFavorite,
     toggleFavorite,
+    exportFavorites,
     deleteJob,
     saveAsset,
     copyAsset,

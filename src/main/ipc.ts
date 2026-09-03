@@ -266,7 +266,7 @@ export function registerIpcHandlers(): void {
     message: '图片已保存。'
   }))
   handle<[string[]], unknown>('asset:save-many', async (_, assetIds) => {
-    if (!Array.isArray(assetIds) || assetIds.length > 100) throw new Error('图片列表无效。')
+    if (!Array.isArray(assetIds) || assetIds.length > 1000) throw new Error('图片列表无效。')
     const count = await saveAssets(assetIds.map((id) => requireUuid(id, '图片')))
     return {
       success: count > 0,

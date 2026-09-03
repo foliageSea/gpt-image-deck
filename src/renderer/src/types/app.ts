@@ -1,4 +1,9 @@
-import type { GenerationJob, GenerationRequest, ReferenceImage } from '../../../shared/image-types'
+import type {
+  GeneratedAsset,
+  GenerationJob,
+  GenerationRequest,
+  ReferenceImage
+} from '../../../shared/image-types'
 
 export type Feedback = {
   type: 'info' | 'success' | 'error'
@@ -42,4 +47,9 @@ export type PendingFlowGeneration = {
   status: 'loading' | 'error'
   error?: string
   cancelling: boolean
+}
+
+export type FavoriteAssetEntry = {
+  asset: GeneratedAsset
+  job: GenerationJob
 }
