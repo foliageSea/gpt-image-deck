@@ -2,15 +2,14 @@
 import type { GeneratedAsset, GenerationJob } from '../../../shared/image-types'
 import type { FlowCreation, FlowReference } from '@/types/app'
 import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
   BookOpenIcon,
+  GripVerticalIcon,
   ImagePlusIcon,
   PinIcon,
   SparklesIcon,
   XIcon
 } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,9 +33,12 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 const props = defineProps<{ history: GenerationJob[] }>()
 const creation = defineModel<FlowCreation | null>('creation', { required: true })
+const draggedReferenceIndex = ref<number | null>(null)
+const dragOverReferenceIndex = ref<number | null>(null)
 
 const emit = defineEmits<{
   openPromptLibrary: []
@@ -115,6 +117,38 @@ function moveReference(index: number, offset: -1 | 1): void {
   if (!references || target < 0 || target >= references.length) return
   const [item] = references.splice(index, 1)
   references.splice(target, 0, item)
+}
+
+function startReferenceDrag(event: DragEvent, index: number): void {
+  draggedReferenceIndex.value = index
+  dragOverReferenceIndex.value = null
+  if (!event.dataTransfer) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+  const card = (event.currentTarget as HTMLElement).parentElement
+  if (card) {
+    const bounds = card.getBoundingClientRect()
+    event.dataTransfer.setDragImage(card, event.clientX - bounds.left, event.clientY - bounds.top)
+  }
+}
+
+function dragReferenceOver(index: number): void {
+  dragOverReferenceIndex.value = draggedReferenceIndex.value === index ? null : index
+}
+
+function dropReference(index: number): void {
+  const references = creation.value?.references
+  const source = draggedReferenceIndex.value
+  if (references && source !== null && source !== index) {
+    const [item] = references.splice(source, 1)
+    references.splice(index, 0, item)
+  }
+  finishReferenceDrag()
+}
+
+function finishReferenceDrag(): void {
+  draggedReferenceIndex.value = null
+  dragOverReferenceIndex.value = null
 }
 
 function setPrimary(index: number): void {
@@ -201,51 +235,52 @@ function reuseStoredReferences(): void {
                 >{{ creation.references.length }}/16</span
               >
             </div>
-            <FieldDescription>序号即发送顺序；主参考用于标记当前分支来源。</FieldDescription>
+            <FieldDescription
+              >拖动右上角手柄排序；序号即发送顺序，主参考用于标记当前分支来源。</FieldDescription
+            >
 
             <div v-if="creation.references.length" class="grid grid-cols-3 gap-2 sm:grid-cols-6">
               <div
                 v-for="(image, index) in creation.references"
                 :key="`${image.kind}-${image.id}`"
-                class="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
+                :class="
+                  cn(
+                    'group relative aspect-square overflow-hidden rounded-lg border bg-muted transition-[opacity,box-shadow,border-color]',
+                    draggedReferenceIndex === index && 'opacity-40',
+                    dragOverReferenceIndex === index && 'border-primary ring-2 ring-primary/30'
+                  )
+                "
+                @dragenter.prevent="dragReferenceOver(index)"
+                @dragover.prevent="dragReferenceOver(index)"
+                @drop.prevent="dropReference(index)"
               >
-                <img :src="image.url" :alt="image.name" class="size-full object-cover" />
+                <img
+                  :src="image.url"
+                  :alt="image.name"
+                  class="size-full object-cover"
+                  draggable="false"
+                />
                 <Badge class="absolute left-1 top-1">{{ index + 1 }}</Badge>
                 <Badge v-if="image.primary" class="absolute bottom-1 left-1" variant="secondary">
                   主参考
                 </Badge>
+                <span
+                  class="absolute right-1 top-1 flex size-6 cursor-grab items-center justify-center rounded-md bg-secondary text-secondary-foreground shadow-sm active:cursor-grabbing"
+                  draggable="true"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`拖动调整第 ${index + 1} 张参考图顺序`"
+                  @dragstart.stop="startReferenceDrag($event, index)"
+                  @dragend="finishReferenceDrag"
+                  @keydown.left.prevent="moveReference(index, -1)"
+                  @keydown.right.prevent="moveReference(index, 1)"
+                >
+                  <GripVerticalIcon class="size-4" />
+                </span>
                 <div
-                  class="absolute right-1 top-1 flex flex-col gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                  class="absolute bottom-1 right-1 flex flex-col gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
                 >
                   <TooltipProvider :delay-duration="250">
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="secondary"
-                          size="icon-xs"
-                          :disabled="index === 0"
-                          aria-label="前移参考图"
-                          @click="moveReference(index, -1)"
-                        >
-                          <ArrowLeftIcon />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>前移</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="secondary"
-                          size="icon-xs"
-                          :disabled="index === creation.references.length - 1"
-                          aria-label="后移参考图"
-                          @click="moveReference(index, 1)"
-                        >
-                          <ArrowRightIcon />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>后移</TooltipContent>
-                    </Tooltip>
                     <Tooltip v-if="creation.job && !image.primary">
                       <TooltipTrigger as-child>
                         <Button
